@@ -1,0 +1,29 @@
+# Generated data and outputs
+data/
+output/
+
+# Sisyphus tracking
+.sisyphus/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Windows
+*.bat
