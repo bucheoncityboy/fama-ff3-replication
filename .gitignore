@@ -1,6 +1,7 @@
 # Generated data and outputs
 data/
-output/
+output/*.csv
+output/*.md
 
 # Sisyphus tracking
 .sisyphus/
