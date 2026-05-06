@@ -35,10 +35,7 @@ These approximations assume:
 """
 
 import os
-import sys
-from datetime import datetime
 
-import numpy as np
 import pandas as pd
 from pandas_datareader.data import DataReader
 
@@ -194,7 +191,6 @@ def create_bond_portfolios(start=None, end=None):
     start_str = f"{start}-01"
     end_str = f"{end}-01"
 
-    print(DISCLAIMER)
     print(DISCLAIMER)
 
     # ------------------------------------------------------------------
