@@ -93,17 +93,13 @@ def run_ols(
     t_dict = model.tvalues.to_dict()
     p_dict = model.pvalues.to_dict()
 
-    intercept = coef_dict.pop("const", None) if not add_const else coef_dict.get("const", np.nan)
-    if add_const and "const" in coef_dict:
-        intercept = coef_dict.pop("const")
-    elif add_const:
-        intercept = np.nan
-
-    intercept_t_stat = t_dict.pop("const", None) if not add_const else t_dict.get("const", np.nan)
-    if add_const and "const" in t_dict:
-        intercept_t_stat = t_dict.pop("const")
-    elif add_const:
-        intercept_t_stat = np.nan
+    # Clean intercept extraction
+    if add_const:
+        intercept = coef_dict.pop("const", np.nan)
+        intercept_t_stat = t_dict.pop("const", np.nan)
+    else:
+        intercept = None
+        intercept_t_stat = None
 
     # Ensure only original factor names remain in coefficient dicts
     coeff_out = {k: coef_dict.get(k, np.nan) for k in independent.columns}
@@ -186,6 +182,8 @@ def compute_residual_covariance(
     Returns
     -------
     pd.DataFrame (N×N) with portfolio names as index/columns.
+    Returns the raw covariance matrix. Downstream consumers that need
+    inversion should use np.linalg.pinv for near-singular matrices.
     """
     # Collect residuals
     resid_list = []
@@ -205,13 +203,10 @@ def compute_residual_covariance(
     # Compute covariance
     cov = df_resid.cov()
 
-    # Fallback for near-singular matrix: use pseudo-inverse to project
-    # We return the covariance itself, but if it's singular we regularise
-    # slightly so downstream GRS test can still proceed.
-    eigvals = np.linalg.eigvalsh(cov.values)
-    if np.min(eigvals) < 1e-12:
-        # Ridge-style regularisation (standard approach in asset pricing)
-        cov = cov + np.eye(cov.shape[0]) * 1e-8
+    # Return the raw covariance matrix. Downstream consumers that need inversion
+    # (e.g., the GRS test) should use np.linalg.pinv for near-singular matrices.
+    # The GRS test in 05_section5_grs_test.py already implements safe_inv() with
+    # pinv fallback, so no regularisation is needed here.
 
     cov.index = names
     cov.columns = names
