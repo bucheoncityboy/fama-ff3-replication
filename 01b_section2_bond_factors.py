@@ -23,8 +23,8 @@ import config
 # Prominent disclaimer constants
 DISCLAIMER = (
     "TERM and DEF are yield-based proxy factors constructed from FRED data, "
-    "not return-based factors as in FF(1993). "
-    "Numerical results may differ from the original paper."
+    "not return-based factors as in FF(1993). DEF is the BAA-AAA corporate "
+    "bond yield spread. Numerical results may differ from the original paper."
 )
 
 CSV_DISCLAIMER = (
