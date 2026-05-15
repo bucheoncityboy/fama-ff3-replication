@@ -12,15 +12,15 @@
 - **분석 기간**: 1963-07 ~ 1991-12 (342개월)
 - **5개 요인**: Mkt-RF, SMB, HML, TERM, DEF
 - **검정 자산**: 25개 규모 × 장부가치/시장가치(BE/ME) 주식 포트폴리오 + 7개 채권 포트폴리오 프록시
-- **데이터 출처**: Hybrid stock-side data (Ken French 1963-07~1968-06 + CRSP-derived 1968-07~1991-12) + FRED (채권 수익률 프록시)
+- **데이터 출처**: 기존과 동일하게 Ken French Data Library + FRED. 이번 변경은 새 소스 수집이 아니라, 기존에 보관된 `crsp/FF1993_results/data/crsp_*`를 1968-07 이후 구간에 입력 대체 적용한 것이다.
 
 > **채권 프록시 면책 조항**: 본 복제에서 사용된 채권 요인(TERM, DEF)은 FRED(GS10, TB3MS, BAA, AAA)에서 수집한 실제 시장 데이터(수익률 스프레드)이다. 다만 채권 포트폴리오는 실제 채권 포트폴리오 수익률이 아니라, 해당 수익률 기반 추정치(yield-based proxies)이다. 이는 원 논문에서 사용된 CRSP 채권 데이터에 접근할 수 없는 모든 복제 연구에 내재된 한계이다.
 
 ### 최근 업데이트 (Recent Updates)
 
-- **2026-05-15 — CRSP hybrid stock-side data substitution**
+- **2026-05-15 — CRSP hybrid stock-side data substitution (source unchanged)**
   - `data/ff_factors.csv`, `data/ff_6_portfolios.csv`, `data/ff_25_portfolios.csv`를 342개월 hybrid 입력으로 교체
-  - 1963-07~1968-06은 기존 프로젝트/Ken French 데이터 유지, 1968-07~1991-12는 `crsp/FF1993_results/data/crsp_*`의 CRSP-derived stock data 사용
+  - 데이터 수집 소스는 기존과 동일(Ken French/FRED). 1963-07~1968-06은 기존 입력 유지, 1968-07~1991-12는 이미 보관된 `crsp/FF1993_results/data/crsp_*`를 입력으로 대체
   - 원본 입력과 기존 output은 `data/backups/2026-05-15-pre-crsp-hybrid/`, `output/backups/2026-05-15-pre-crsp-hybrid/`에 보존
   - 전체 분석 output 재생성 및 최종 보고서에 hybrid provenance 명시
   - 테스트 206개 전체 통과 (`python -m pytest -q`), 단 hybrid 데이터에서는 5요인 주식 모델의 평균 |alpha|가 1요인보다 높게 나타나며 3요인 주식 모델이 가장 낮은 stock |alpha|를 보임

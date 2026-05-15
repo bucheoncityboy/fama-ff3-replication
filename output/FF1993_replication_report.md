@@ -4,7 +4,7 @@
 
 **Replication Period**: 1963-07 to 1991-12  
 **Methodology**: Time-series regression approach with 25 size x BE/ME stock portfolios and 7 bond portfolios  
-**Data Sources**: Hybrid stock-side data: Ken French Data Library for 1963-07 through 1968-06 and CRSP-derived stock data for 1968-07 through 1991-12; FRED (Federal Reserve Economic Data) for bond proxies
+**Data Sources**: External data providers unchanged (Ken French Data Library and FRED). For this run, stock-side input mapping uses existing project/Ken French data for 1963-07 through 1968-06 and already-collected CRSP-derived stock data for 1968-07 through 1991-12.
 
 ---
 
@@ -190,7 +190,7 @@ This replication of Fama and French (1993) produces findings that are broadly co
 
 - **Bond proxy data**: The TERM and DEF factors are constructed from yield spreads (GS10, TB3MS, BAA, AAA) rather than actual bond portfolio returns. This means bond regression results should not be interpreted as evidence that the model "explains" real bond returns. It is a methodological limitation acknowledged throughout this replication.
 - **Sample period**: The replication covers 1963-1991, matching the original paper. Results may differ in other periods.
-- **Hybrid stock-side data**: Stock factor and portfolio inputs use the original project data for 1963-07 through 1968-06 and CRSP-derived stock data for 1968-07 through 1991-12. This does not claim full-period CRSP coverage back to 1963-07.
+- **Hybrid stock-side data**: Stock factor and portfolio inputs use the original project data for 1963-07 through 1968-06 and already-collected CRSP-derived stock data for 1968-07 through 1991-12. Data collection sources are unchanged from prior runs, and this does not claim full-period CRSP coverage back to 1963-07.
 - **Portfolio construction**: The final 1968-07 onward stock-side inputs come from CRSP-derived files already present in `crsp/FF1993_results/data/`; this run does not rebuild the raw CRSP-COMPUSTAT extraction.
 
 ### Consistency with Fama-French (1993)
