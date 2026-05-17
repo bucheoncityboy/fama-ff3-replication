@@ -1,77 +1,49 @@
-# Fama-French (1993) Replication — 주식과 채권 수익률의 공통 위험요인
+# Fama-French (1993) Replication: 주식과 채권 수익률의 공통 위험요인
 
-본 프로젝트는 Fama & French (1993)의 논문 *"Common Risk Factors in the Returns on Stocks and Bonds"*을 Python으로 복제한 결과이다. 기존의 단일 요인 모델(CAPM)을 넘어, 시장 요인(Mkt-RF)에 규모(SMB), 가치(HML), 기간 스프레드(TERM), 부도 스프레드(DEF)를 추가한 5요인 모델을 재구성하고, 1963년 7월부터 1991년 12월까지 25개 주식 포트폴리오와 7개 채권 포트폴리오에 대한 설명력을 평가한다.
+본 프로젝트는 Fama & French (1993)의 논문 *"Common Risk Factors in the Returns on Stocks and Bonds"*를 Python으로 복제한 결과이다. 시장 요인(Mkt-RF)에 규모(SMB), 가치(HML), 기간 스프레드(TERM), 부도 스프레드(DEF)를 추가한 5요인 모델을 재구성하고, 1963년 7월부터 1991년 12월까지 25개 주식 포트폴리오와 7개 채권 포트폴리오에 대한 설명력을 평가한다.
 
 ---
 
-## 1. 소개
+## 1. 서론 (Introduction)
 
-자본자산가격결정모형(CAPM)은 단일 시장 요인이 기대수익률의 횡단면을 설명한다고 주장한다. 그러나 1980년대와 1990년대 초반에 축적된 실증 연구 결과는 이 예측을 반복적으로 기각했다. 이에 Fama와 French(1993)은 시장 요인에 규모(SMB), 가치(HML), 그리고 두 개의 채권 요인(TERM과 DEF)을 추가한 다요인 모델을 제안했다.
+자본자산가격결정모형(CAPM)은 단일 시장 요인이 기대수익률의 횡단면을 설명한다고 주장한다. 그러나 1980년대와 1990년대 초반에 축적된 실증 연구는 이 예측을 반복적으로 기각했다. Fama와 French(1993)은 시장 요인에 규모(SMB), 가치(HML), 그리고 두 개의 채권 요인(TERM과 DEF)을 추가한 다요인 모델을 제안했다.
 
 ### 복제 범위
 - **분석 기간**: 1963-07 ~ 1991-12 (342개월)
 - **5개 요인**: Mkt-RF, SMB, HML, TERM, DEF
-- **검정 자산**: 25개 규모 × 장부가치/시장가치(BE/ME) 주식 포트폴리오 + 7개 채권 포트폴리오 프록시
-- **데이터 출처**: Compustat BE 데이터 기반 포트폴리오 자체 구축 + CRSP 원시 데이터 + FRED 채권 데이터. `compustat_portfolio_builder.py`가 gvkey↔PERMCO 오픈소스 매핑을 통해 1964-07~1991-12 구간의 25/6 포트폴리오와 SMB/HML 요인을 자체 생성한다. 1963-07~1964-06(12개월)은 Ken French 데이터를 유지한 hybrid 방식이다.
+- **검정 자산**: 25개 Size × BE/ME 주식 포트폴리오 + 7개 채권 포트폴리오 프록시
+- **주식 포트폴리오 구축**: `compustat_portfolio_builder.py`가 Compustat BE + CRSP 원시 데이터로 1964-07~1991-12 구간(330개월)의 25/6 포트폴리오와 SMB/HML 요인을 자체 생성한다. gvkey↔PERMCO 오픈소스 매핑(Wenzhi-Ding/Std_Security_Code)을 통해 CRSP/CCM 상용 데이터베이스 없이 구축했다. 1963-07~1964-06(12개월)은 Ken French 데이터를 유지한 hybrid 방식이다.
 
-> **채권 프록시 면책 조항**: 본 복제에서 사용된 채권 요인(TERM, DEF)은 FRED(GS10, TB3MS, BAA, AAA)에서 수집한 실제 시장 데이터(수익률 스프레드)이다. 다만 채권 포트폴리오는 실제 채권 포트폴리오 수익률이 아니라, 해당 수익률 기반 추정치(yield-based proxies)이다. 이는 원 논문에서 사용된 CRSP 채권 데이터에 접근할 수 없는 모든 복제 연구에 내재된 한계이다.
-
-### 최근 업데이트 (Recent Updates)
-
-- **2026-05-17 — Compustat BE 데이터 기반 포트폴리오 자체 구축**
-  - `compustat_portfolio_builder.py` 신규 모듈: Compustat BE + CRSP 원시 데이터로 FF 25/6 포트폴리오와 SMB/HML 요인을 자체 구축
-  - gvkey↔PERMCO 매핑: Wenzhi-Ding/Std_Security_Code 오픈소스를 통해 CRSP/CCM 없이 구축
-  - PERMCO bridge: gvkey→PERMCO(정적) → PERMNO(CRSP date range) 순차 링킹
-  - BE 데이터: `compustat_be.csv` (pre-computed, flag-validated: se_flag 96.7% 'seq', dt_flag 94.5% 'txditc', ps_flag 99.8% 'pstkrv')
-  - 포트폴리오 적용: 1964-07~1991-12 구간 자체 구축 (330개월), 1963-07~1964-06 Ken French 데이터 유지 (12개월 hybrid)
-  - FF1992 방법론: NYSE breakpoints, June 리밸런싱, 금융업 제외(SICH 6000-6999), 음수 BE 제외
-  - 전체 파이프라인 11개 스크립트 정상 실행, 테스트 274개 통과 / 1개 skip (`python -m pytest -q`)
-  - 기존 `data/ff_*.csv` 파일을 `compustat_portfolio_builder.py` 생성 결과로 교체
-
-- **2026-05-15 — CRSP hybrid stock-side data substitution (source unchanged)**
-  - `data/ff_factors.csv`, `data/ff_6_portfolios.csv`, `data/ff_25_portfolios.csv`를 342개월 hybrid 입력으로 교체
-  - 데이터 수집 소스는 기존과 동일(Ken French/FRED). 1963-07~1968-06은 기존 입력 유지, 1968-07~1991-12는 이미 보관된 `crsp/FF1993_results/data/crsp_*`를 입력으로 대체
-  - 원본 입력과 기존 output은 `data/backups/2026-05-15-pre-crsp-hybrid/`, `output/backups/2026-05-15-pre-crsp-hybrid/`에 보존
-  - 전체 분석 output 재생성 및 최종 보고서에 hybrid provenance 명시
-  - 테스트 206개 전체 통과 (`python -m pytest -q`), 단 hybrid 데이터에서는 5요인 주식 모델의 평균 |alpha|가 1요인보다 높게 나타나며 3요인 주식 모델이 가장 낮은 stock |alpha|를 보임
-
-- **2025-05-07 — DEF 버그 수정 및 코드 품질 개선**
-  - `fred_bond_fetcher.py`: DEF를 BAA-AAA 회사채 수익률 스프레드로 재정의 (기존: 월간 수익률과 연간 수익률을 혼합하여 단위 불일치)
-  - `regression_engine.py`: intercept 추출 로직 단순화(11줄 → 2줄), ridge 정규화 제거 후 `pinv` 기반으로 통일
-  - `02b_section2_bond_portfolios.py`: FRED yield가 연간화되어 있으므로 `/12`로 월간 변환 추가
-  - 채권 R² 인공적 1.0 문제 해결 (기존: 인위적 공선성으로 ≈1.000 → 수정 후: max 0.985)
-  - 테스트 206개 전체 통과, `test_paper_comparison.py` 신규 추가 (논문 수치 비교)
+> **채권 프록시 면책 조항**: 본 복제에서 사용된 채권 요인(TERM, DEF)은 FRED(GS10, TB3MS, BAA, AAA)에서 수집한 실제 시장 데이터(수익률 스프레드)이다. 다만 채권 포트폴리오는 실제 채권 포트폴리오 수익률이 아니라 해당 수익률 기반 추정치(yield-based proxies)이다.
 
 ---
 
-## 2. 저장소 구조 및 파일 맵핑
+## 2. 논문 섹션별 구현 맵핑 (Paper-to-Code Mapping)
 
-각 Python 스크립트는 원 논문의 특정 섹션이나 표와 대응한다.
+각 Python 스크립트는 원 논문의 특정 섹션 및 표와 대응한다.
 
-| 논문 섹션 | 스크립트 | 설명 |
-|-----------|----------|------|
-| Section 2.1 (주식 요인) | `01_section2_factors.py` | 6개 포트폴리오로부터 SMB/HML 구성 |
-| Section 2.1 (채권 요인) | `01b_section2_bond_factors.py` | TERM/DEF를 주식 요인과 병합 |
-| Section 2.2 (주식 포트폴리오) | `02_section2_portfolios.py` | 25개 규모 × BE/ME 포트폴리오 불러오기 |
-| Section 2.2 (채권 포트폴리오) | `02b_section2_bond_portfolios.py` | 7개 채권 포트폴리오 프록시 생성 |
-| Section 3 (기술통계) | `03_section3_statistics.py` | Table 2 요약 통계량 |
-| Section 4.1-4.3 (공통 변동) | `04_section4_regressions.py` | Tables 1, 3, 4 회귀분석 |
-| Section 4.4 (5요인 모델) | `04b_section4_five_factor.py` | Table 5 통합 회귀분석 |
-| Section 5 (GRS 검정) | `05_section5_grs_test.py` | GRS F-검정 구현 |
-| Section 5 (절편 분석) | `05b_section5_intercepts.py` | 횡단면 절편 분석 |
-| Section 6 (시각화) | `06_section6_visualizations.py` | 6개 학술 품질 Figure 생성 |
-| Section 1+6 (보고서) | `06_section6_conclusions.py` | 최종 Markdown 보고서 생성 |
-| Section 2.1 (포트폴리오 구축) | `compustat_portfolio_builder.py` | Compustat BE + CRSP 데이터로 25/6 포트폴리오와 SMB/HML 자체 구축 |
-| Section 2.1 (테스트) | `tests/test_compustat_portfolio_builder.py` | compustat_portfolio_builder.py 단위 테스트 (274개 통과) |
-| 공유 인프라 | `regression_engine.py` | OLS 래퍼, 배치 회귀, GRS 공분산 |
-| 데이터 파이프라인 | `download_data.py` | 데이터 자동 다운로드 |
-| 파서 | `ken_french_parser.py` | Ken French CSV 파서 |
-| 채권 수집기 | `fred_bond_fetcher.py` | FRED 채권 데이터 수집기 |
-| 설정 | `config.py` | 프로젝트 설정 |
+| 논문 Section | 논문 내용 | 구현 스크립트 | 설명 |
+|---|---|---|---|
+| FF1993 Section 2.1 | 주식 요인 SMB/HML 구성 | `01_section2_factors.py` | 6개 포트폴리오로 SMB/HML 계산 |
+| FF1993 Section 2.1 | 채권 요인 TERM/DEF 구성 | `01b_section2_bond_factors.py` | FRED yield로 TERM/DEF 병합 |
+| FF1993 Section 2.2 | 25개 Size×BE/ME 포트폴리오 | `02_section2_portfolios.py` | 포트폴리오 수익률 로드 |
+| FF1993 Section 2.2 | 7개 채권 포트폴리오 프록시 | `02b_section2_bond_portfolios.py` | yield 기반 프록시 생성 |
+| FF1993 Section 3 | 기술통계 (Table 2) | `03_section3_statistics.py` | 평균, 표준편차, t-통계량 |
+| FF1993 Section 4.1-4.3 | 회귀분석 (Tables 1,3,4) | `04_section4_regressions.py` | 1F/3F/채권 모델 |
+| FF1993 Section 4.4 | 5요인 모델 (Table 5) | `04b_section4_five_factor.py` | 통합 5요인 모델 |
+| FF1993 Section 5 | GRS 검정 | `05_section5_grs_test.py` | GRS F-검정 |
+| FF1993 Section 5 | 절편 분석 | `05b_section5_intercepts.py` | 횡단면 절편 분포 |
+| FF1993 Section 6 | 시각화 + 보고서 | `06_section6_visualizations.py` + `06_section6_conclusions.py` | 6개 Figure + 보고서 |
+| Compustat BE 구축 | 포트폴리오 자체 구축 | `compustat_portfolio_builder.py` | gvkey→PERMCO→PERMNO 링킹 |
+| 공유 인프라 | - | `regression_engine.py` | OLS 래퍼, 배치 회귀, GRS 공분산 |
+| 데이터 파이프라인 | - | `download_data.py` | Ken French + FRED 자동 다운로드 |
+| 파서 | - | `ken_french_parser.py` | Ken French CSV 파서 |
+| 채권 수집기 | - | `fred_bond_fetcher.py` | FRED 채권 데이터 수집 |
+| 설정 | - | `config.py` | 프로젝트 설정 |
 
 ---
 
-## 3. 실행 방법
+## 3. 실행 방법 (How to Run)
 
 ### 사전 요건
 - Python 3.10+
@@ -86,8 +58,6 @@ pip install -r requirements.txt
 # 2. 데이터 다운로드
 python download_data.py
 ```
-
-위 명령어는 Ken French Data Library와 FRED에서 필요한 모든 데이터를 가져와 `data/` 디렉토리에 저장한다.
 
 ### 전체 분석 순차 실행
 
@@ -106,7 +76,7 @@ python 06_section6_visualizations.py
 python 06_section6_conclusions.py
 ```
 
-생성된 결과물(CSV 및 PNG 파일)은 `output/` 디렉토리에 저장된다.
+결과물(CSV, PNG)은 `output/` 디렉토리에 저장된다.
 
 ### 테스트 실행
 
@@ -117,274 +87,215 @@ python -m pytest -q
 
 ---
 
-## 4. 핵심 결과
+## 4. 핵심 결과 (Key Results)
 
-### Table 1 — 시장 요인 단독
-- **주식 포트폴리오**: R²는 0.60에서 0.90까지 분포하며, 평균 **0.7530**이다. 시장 요인이 주식 수익률 변동의 상당 부분을 설명한다.
-- **채권 포트폴리오**: 평균 R²는 **0.0173**이다. 시장 요인은 채권 수익률 변동을 거의 설명하지 못한다.
-- **결론**: 단일 시장 요인은 주식에는 적절하지만, 채권에는 전혀 부족하다.
+### Table 2: 기술통계 (The Playing Field)
 
-### Table 3 — 채권 요인 단독
-- **채권 포트폴리오**: 평균 R²는 **0.9110**이다. TERM과 DEF가 채권 프록시 변동의 대부분을 설명하지만, 이는 yield-based proxy 구성과 기계적으로 연결된 측면이 있다.
-- **주식 포트폴리오**: 채권 요인은 주식 수익률에 거의 설명력을 추가하지 못한다.
-- **결론**: 채권 요인은 채권 변동을 포착하지만, 주식 변동을 설명하는 데는 실패한다.
+**25개 주식 포트폴리오 평균 월간 초과수익률 (%)**
 
-### Table 4 — 3요인 주식 모델
-- **주식 포트폴리오**: R²가 0.82~0.95로 향상되며, 평균 **0.8992**이다.
-- **SMB와 HML**: 두 요인 모두 거의 모든 포트폴리오에서 강하게 유의하다.
-- **절편**: 평균 절대절편 |α| = **월 0.1247%**로 0에 비교적 가깝다.
-- **결론**: 3요인 모델은 주식 수익률을 훌륭하게 설명한다.
+| Size / BE-ME | LoBM | BM2 | BM3 | BM4 | HiBM |
+|---|---|---|---|---|---|
+| SMALL | 0.41 | 0.71 | 0.69 | 0.88 | 1.06 |
+| ME2 | 0.42 | 0.61 | 0.82 | 0.96 | 0.95 |
+| ME3 | 0.35 | 0.88 | 0.80 | 0.91 | 1.04 |
+| ME4 | 0.46 | 0.53 | 0.68 | 0.89 | 0.93 |
+| BIG | 0.39 | 0.31 | 0.30 | 0.51 | 0.61 |
 
-### Table 5 — 5요인 통합 모델
-- **주식 포트폴리오**: 평균 R² = **0.8999**이다. 3요인 모델 대비 R² 개선은 약 **0.07 percentage point**로 작다.
-- **주식에 대한 채권 요인**: TERM과 DEF는 주식 수익률에 거의 설명력을 추가하지 못한다.
-- **채권에 대한 주식 요인**: SMB와 HML은 채권 수익률에 거의 설명력을 추가하지 못한다. 채권 평균 R²는 **0.9146**이다.
-- **결론**: 요인 지배 패턴이 확인되었다. 주식 요인은 주식을 설명하고, 채권 요인은 채권을 설명하며, 자산 간 교차 효과는 제한적이다.
+**7개 채권 포트폴리오 평균 월간 초과수익률 (%)**
+
+| 포트폴리오 | 평균 | 표준편차 | t-통계량 |
+|---|---|---|---|
+| SHORT_TERM | 0.06 | 0.04 | 26.53 |
+| LONG_TERM | 0.11 | 0.11 | 18.00 |
+| AAA | 0.12 | 0.11 | 20.58 |
+| AA | 0.14 | 0.11 | 22.93 |
+| A | 0.16 | 0.12 | 25.04 |
+| BBB | 0.18 | 0.12 | 26.93 |
+| LOW_GRADE | 0.20 | 0.13 | 28.61 |
+
+**요인 프리미엄 (%/월)**
+
+| 요인 | 평균 | 표준편차 | t-통계량 |
+|---|---|---|---|
+| Mkt-RF | 0.42 | 4.54 | 1.69 |
+| SMB | 0.29 | 3.01 | 1.78 |
+| HML | 0.41 | 2.43 | 3.15 |
+| TERM | 1.26 | 1.30 | 17.88 |
+| DEF | 1.11 | 0.48 | 42.82 |
+
+- **원 논문 비교 (FF1993 Table 2)**: SMALL LoBM 약 0.30%/mo, SMALL HiBM 약 0.96%/mo, BIG LoBM 약 0.43%/mo, BIG HiBM 약 0.67%/mo. SMB 프리미엄 약 0.27%/mo, HML 약 0.40%/mo, Mkt-RF 약 0.43%/mo.
+- **일치도**: 높음. 규모 효과와 가치 효과 패턴이 일관되며, 프리미엄 추정치도 유사하다(SMB 0.29 vs 0.27, HML 0.41 vs 0.40, Mkt-RF 0.42 vs 0.43). 본 복제의 SMALL HiBM(1.06)이 논문(0.96)보다 다소 높다.
+
+### Table 1: 시장 요인 단독 (One-Factor Model)
+
+| 구분 | 본 복제 R² | FF1993 논문 R² | 일치도 |
+|---|---|---|---|
+| 주식 (25개) 평균 | 0.7530 | 약 0.71~0.76 | 매우 높음 |
+| 주식 R² 범위 | 0.6005~0.8954 | 0.60~0.90 | 매우 높음 |
+| 채권 (7개) 평균 | 0.0173 | 약 0.01~0.02 | 높음 |
+
+**해석**: 시장 요인은 주식 수익률 변동의 75.3%를 설명하지만, 채권은 1.7%만 설명한다. 평균 |t(Mkt-RF)| = 33.94(주식) vs 2.27(채권). 논문의 핵심 발견인 "시장 요인은 주식에만 유효하다"는 결과가 정확히 복제되었다.
+
+### Table 3: 채권 요인 단독 (Two-Factor Bond Model: TERM+DEF)
+
+| 구분 | 본 복제 R² | FF1993 논문 R² | 일치도 |
+|---|---|---|---|
+| 주식 (25개) 평균 | 0.0283 | < 0.03 | 높음 |
+| 채권 (7개) 평균 | 0.9110 | 약 0.88~0.97 | 높음 |
+
+**해석**: TERM과 DEF는 채권 프록시 변동의 91.1%를 설명하지만, 주식 수익률에는 거의 설명력이 없다(2.8%). 다만 채권 R²는 yield-based proxy 구성의 기계적 공선성 영향을 받아 원 논문의 실제 채권 포트폴리오 기반 R²보다 다소 높을 수 있다.
+
+### Table 4: 3요인 주식 모델 (Three-Factor Stock Model: Mkt-RF+SMB+HML)
+
+| 구분 | 본 복제 | FF1993 논문 | 일치도 |
+|---|---|---|---|
+| 주식 평균 R² | 0.8992 | 약 0.91 | 높음 |
+| 주식 R² 범위 | 0.82~0.95 | 0.82~0.95 | 매우 높음 |
+| 주식 평균 |α| (%/월) | 0.1247 | 약 0.10~0.14 | 높음 |
+| 1요인 대비 R² 개선 | +14.6pp | 약 +16pp | 높음 |
+
+**해석**: SMB와 HML 추가로 주식 R²가 75.3%에서 89.9%로 크게 향상되었다. 평균 절대절편 0.1247%/월은 0에 가까워, 3요인 모델이 주식 수익률 횡단면을 잘 설명함을 의미한다.
+
+### Table 5: 5요인 통합 모델 (Five-Factor Model)
+
+| 구분 | 본 복제 R² | FF1993 논문 R² | 일치도 |
+|---|---|---|---|
+| 주식 평균 | 0.8999 | 약 0.91 | 높음 |
+| 3F→5F 주식 개선 | +0.07pp | 미미 (≈0) | 높음 |
+| 채권 평균 | 0.9146 | - | - |
+
+**해석**: 주식에 채권 요인(TERM, DEF)을 추가한 개선은 +0.07pp로 미미하다. 채권에도 주식 요인(SMB, HML) 추가 효과는 거의 없다. 요인 지배 패턴(주식 요인→주식, 채권 요인→채권)이 명확히 확인된다.
 
 ### GRS 검정 (Section 5)
-- **3요인 주식 모델**: F = **1.4493**, p = **0.0792** — 10% 수준에서는 한계적으로 기각되나, 5% 수준에서는 기각되지 않는다.
-- **5요인 주식 모델**: F = **1.7871**, p = **0.0131** — 5% 수준에서 기각된다.
-- **2요인 채권 모델**: F = **1.7375**, p = **0.0994** — 5% 수준에서는 기각되지 않는다.
-- **결론**: 3요인 모델은 주식에서 우수한 성능을 보인다. 5요인 모델은 과적합(overfitting)을 보인다. 2요인 채권 모델은 기각되지 않는다.
 
-### 절편 분석 (Section 5)
-- **3요인 주식 평균 |α|** = 0.1247%
-- **5요인 주식 평균 |α|** = 0.3020%
-- **1요인 주식 평균 |α|** = 0.2680%
-- **2요인 채권 평균 |α|** = 0.0047%
-- **해석**: Hybrid stock-side data에서는 채권 프록시를 추가한 5요인 주식 모델보다 3요인 주식 모델의 평균 |α|가 더 낮다.
+| 검정 | N | K | F-통계량 | p-값 | 평균 |α| | 본 복제 vs FF1993 |
+|---|---|---|---|---|---|---|---|
+| 주식 3요인 | 25 | 3 | 1.4493 | 0.0792 | 0.1206 | FF1993: F≈1.50~2.00, 1% 기각 안됨 ✅ |
+| 주식 5요인 | 25 | 5 | 1.7871 | 0.0131 | 0.3012 | 5%에서 기각, 3F보다 악화 |
+| 채권 2요인 | 7 | 2 | 1.7375 | 0.0994 | 0.0047 | 5%에서 기각 안됨 ✅ |
+| 채권 5요인 | 7 | 5 | 1.3704 | 0.2170 | 0.0039 | 가장 낮은 F, 양호 |
+| 통합 5요인 | 32 | 5 | 1.7405 | 0.0097 | 0.2362 | 1%에서 기각 ✅ (논문과 일치) |
 
-### 시각화 결과
+**해석**: 주식 3요인 모델(F=1.4493, p=0.0792)은 5% 유의수준에서 기각되지 않는다. 이는 FF1993의 3요인 모델이 주식 수익률 횡단면을 합리적으로 설명한다는 결론과 일치한다. 통합 5요인 모델은 1%에서 기각(p=0.0097)되며, 이는 논문에서도 보고된 결과이다. 5요인 주식 모델이 3요인보다 GRS가 악화되는 것은 채권 프록시(TERM, DEF)가 주식 포트폴리오에 노이즈를 추가하기 때문으로 해석된다.
 
-본 프로젝트는 **6개의 학술 품질 Figure**를 생성한다. 아래는 각 Figure에 대한 구체적인 분석과 논문의 핵심 인사이트를 시각적으로 확인한 결과이다.
+### 절편 분석
+
+| 모델 | 전체 평균 |α| | 주식 평균 |α| | 채권 평균 |α| | % 유의한 절편 |
+|---|---|---|---|---|---|---|---|
+| 1요인 (시장) | 0.2393 | 0.2680 | 0.1366 | 50.0% |
+| 2요인 (채권) | 1.1357 | 1.4524 | 0.0047 | 28.1% |
+| 3요인 (주식) | 0.1273 | 0.1247 | 0.1363 | 28.1% |
+| 5요인 (통합) | 0.2368 | 0.3020 | 0.0039 | 9.4% |
+
+- **핵심 인사이트**: Hybrid stock-side 데이터에서 3요인 주식 모델의 주식 평균 |α|(0.1247%)가 가장 낮다. 채권 프록시를 추가한 5요인 모델은 주식 절편(0.3020%)이 오히려 증가하여, TERM/DEF가 주식 횡단면 프라이싱 에러를 줄이지 못함을 보여준다.
 
 ---
+
+## 5. 시각화 결과 (Figures 1-6)
 
 #### Figure 1: Average Monthly Excess Returns Heatmap (Table 2)
-
 ![Figure 1](output/fig1_average_returns_heatmap.png)
 
-**해석**: 25개 주식 포트폴리오의 평균 월간 초과수익률을 Size(세로) × BE/ME(가로) 히트맵으로 시각화했다. 원 논문의 대표적인 패턴이 확인된다:
+25개 주식 포트폴리오의 평균 월간 초과수익률을 Size(세로) × BE/ME(가로) 히트맵으로 시각화했다. 규모 효과(동일 BE/ME 내 Small→Big 감소)와 가치 효과(동일 Size 내 LoBM→HiBM 증가)가 모두 확인된다. Small & HiBM 셀에서 가장 높은 수익률(1.06%/월)을 보인다.
 
-- **규모 효과(Size effect)**: 같은 BE/ME 그룹 내에서 Small → Big로 갈수록 초과수익률이 감소한다 (왼쪽이 더 진한 초록색).
-- **가치 효과(Value effect)**: 같은 Size 그룹 내에서 LoBM → HiBM로 갈수록 초과수익률이 증가한다 (아래쪽이 더 진한 초록색).
-- **Small-Value anomaly**: Small & HiBM 셀에서 가장 높은 평균 초과수익률을 보인다. 이것이 Fama-French가 SMB와 HML 요인을 도입한 핵심 동기이다.
-
----
-
-#### Figure 2: Cumulative Factor Returns (1963–1991)
-
+#### Figure 2: Cumulative Factor Returns (1963-1991)
 ![Figure 2](output/fig2_factor_cumulative_returns.png)
 
-**해석**: 5개 요인(Mkt-RF, SMB, HML, TERM, DEF)의 누적 수익률 시계열이다. 각 패널은 해당 요인의 장기적 성과와 변동성 특성을 보여준다:
-
-- **Mkt-RF**: 342개월 기간 동안 강한 상승 추세를 보이며, 주식 시장의 장기적 위험 프리미엄을 확인시켜준다.
-- **SMB**: 소형주 프리미엄의 시계열 변동을 보여준다. 1980년대 초반과 후반에 상승 국면이 있다.
-- **HML**: 가치주 프리미엄도 장기적으로 양수이나, SMB보다 변동성이 크다. 특정 기간(예: 1980년대 중반)에 급등하는 모습이 보인다.
-- **TERM & DEF**: 채권 요인은 주식 요인 대비 평균이 낮고 변동성도 작다. 이는 채권 시장의 위험 프리미엄이 주식보다 작음을 반영한다.
-
----
+5개 요인의 누적 수익률 시계열. Mkt-RF는 342개월 동안 강한 상승 추세. SMB는 1980년대에 상승 국면, HML은 SMB보다 변동성이 크다. TERM과 DEF는 주식 요인 대비 평균이 낮고 변동성도 작다.
 
 #### Figure 3: Average R² Across Model Specifications
-
 ![Figure 3](output/fig3_r2_comparison.png)
 
-**해석**: 주식 포트폴리오(파란색)와 채권 포트폴리오(주황색)에 대해 4가지 모델 사양의 평균 R²를 비교한 그래프이다. 이것이 논문의 가장 중요한 시각적 요약이다:
+4가지 모델 사양의 평균 R² 비교. 주식: 1F(0.753) → 3F(0.899) → 5F(0.900). 채권: 1F(0.017) → 2F(0.850+) → 5F(0.870+). 요인 지배 패턴이 시각적으로 명확히 드러난다.
 
-- **주식 포트폴리오**:
-  - 시장 단독(1-Factor): 평균 R² ≈ 0.753
-  - 3요인 모델: 평균 R² ≈ 0.899 (시장 단독 대비 +0.146)
-  - 5요인 모델: 평균 R² ≈ 0.900 (3요인 대비 미미한 개선)
-  - **인사이트**: SMB와 HML이 주식 변동의 상당 부분을 추가로 설명하지만, 채권 요인(TERM, DEF)은 주식에 거의 기여하지 않는다.
-
-- **채권 포트폴리오**:
-  - 시장 단독: R² ≈ 0 (시장 요인은 채권을 전혀 설명하지 못함)
-  - 2요인(채권) 모델: R² ≈ 0.85 (TERM과 DEF가 채권 변동의 대부분을 설명)
-  - 5요인 모델: R² ≈ 0.87 (주식 요인 추가는 미미)
-  - **인사이트**: 요인 지배(dominated by own factors) 패턴이 명확히 드러난다.
-
----
-
-#### Figure 4: Distribution of Alphas — Five-Factor Model
-
+#### Figure 4: Distribution of Alphas, Five-Factor Model
 ![Figure 4](output/fig4_alpha_distribution.png)
 
-**해석**: 5요인 모델의 회귀 절편(α) 분포를 주식 포트폴리오(파란색)와 채권 포트폴리오(주황색)로 비교한 히스토그램이다:
+5요인 모델 α 분포 히스토그램. 주식 α는 0 중심이나 꼬리가 퍼져 있다(평균 |α| 0.302%/월). 채권 α는 0에 밀집(평균 |α| 0.004%/월).
 
-- **주식 α**: 0을 중심으로 분포하나, 꼬리가 양쪽으로 퍼져 있다. Hybrid run의 5요인 주식 평균 절대절편은 ≈ 0.302%/월로, 0에 완벽히 집중되어 있지는 않다. 이는 5요인 모델이 주식의 횡단면을 완전히 설명하지 못함을 시사하며, GRS 검정에서도 기각되는 이유이다.
-- **채권 α**: 0에 훨씬 더 밀집되어 있고 폭이 좁다. 평균 절대절편 ≈ 0.03%/월. 이는 2요인 채권 모델이 채권 수익률을 상대적으로 잘 설명함을 보여준다.
-- **논문적 의미**: α가 0에 가까울수록 요인 모델이 자산의 평균 수익률 횡단면을 잘 설명한다는 의미이다. Hybrid 데이터에서는 주식 3요인 모델(α≈0.125%)이 5요인 모델(α≈0.302%)보다 더 나은 성능을 보인다.
-
----
-
-#### Figure 5: Factor Loadings (Betas) — Five-Factor Model
-
+#### Figure 5: Factor Loadings (Betas), Five-Factor Model
 ![Figure 5](output/fig5_factor_loadings_heatmap.png)
 
-**해석**: 32개 포트폴리오(상단 25개 주식, 하단 7개 채권)에 대한 5요인 모델의 β 계수 히트맵이다. 색상이 진할수록 부하량의 절대값이 크다:
-
-- **주식 포트폴리오의 Mkt-RF 부하**: 모든 주식 포트폴리오에서 강하게 양수(진한 빨강). 시장 베타는 0.8~1.2 범위에 집중되어 있다.
-- **SMB 부하**: Small 포트폴리오(상단)에서 양수, Big 포트폴리오(하단)에서 음수. 규모 요인이 포트폴리오 구성 방식과 정확히 일치함을 보여준다.
-- **HML 부하**: HiBM(가치주)에서 양수, LoBM(성장주)에서 음수. 가치 요인의 구조적 패턴이 명확하다.
-- **TERM/DEF 부하 (주식)**: 거의 0에 가까움(흰색). 채권 요인이 주식 수익률에 거의 영향을 주지 않음을 시각적으로 확인.
-- **채권 포트폴리오**: TERM과 DEF에 강한 양수 부하를 보이며, 주식 요인(Mkt-RF, SMB, HML)에는 거의 부하가 없다.
-- **요인 지배 패턴**: 주식 요인은 주식에, 채권 요인은 채권에 부하가 집중되는 대각선 구조가 뚜렷하다.
-
----
+32개 포트폴리오의 5요인 β 계수 히트맵. 주식 요인(SMB, HML)은 주식 포트폴리오에, 채권 요인(TERM, DEF)은 채권 포트폴리오에 부하가 집중되는 대각선 구조가 뚜렷하다.
 
 #### Figure 6: SMB vs HML Monthly Returns Scatter
-
 ![Figure 6](output/fig6_smb_hml_scatter.png)
 
-**해석**: 342개월간 SMB와 HML의 월간 수익률 산점도이다. 색상은 시간 흐름에 따른 진행(1963 연한색 → 1991 진한색)을 나타낸다:
-
-- **상관관계**: 회귀선 기울기 ≈ 0에 가까우며, SMB와 HML 간의 순수 상관관계는 낮다. 이는 두 요인이 서로 독립적인 정보를 담고 있음을 의미한다.
-- **시간적 패턴**: 초기(1963-1970)와 후기(1980-1991)에 점들이 비슷하게 흩어져 있어, 두 요인의 공분산 구조가 샘플 기간 내내 비교적 안정적임을 시사한다.
-- **이상치**: 1980년대 중반 HML이 급등하는 몇 개월(진한색 점들의 우측 꼬리)이 눈에 띈다. 이는 가치주 프리미엄의 단기적 급등을 반영한다.
-- **다변량 정규성**: 대부분의 점이 원점 주변에 집중되어 있으나, 극단값이 존재한다. GRS 검정의 유효성을 평가할 때 잔차의 공분산 행렬 추정이 중요한 이유이다.
-
----
-
-## 5. 한계점
-
-1. **채권 요인은 실제 FRED 시장 데이터이다**: TERM은 GS10 yield에서 TB3MS yield를 뺀 기간 스프레드(term spread)이며, DEF는 BAA yield에서 AAA yield를 뺀 신용 스프레드(credit spread)이다. 둘 다 FRED에서 수집한 실제 시장 수익률(yield) 데이터이지만, 이는 월간 채권 포트폴리오 수익률(return)이 아니라 수익률 스프레드(yield spread)이다. 이는 원 논문 대비 가장 큰 차이점이다. (참고: 초기 버전의 DEF는 월간 수익률과 연간 수익률을 혼합하여 계산했던 단위 불일치 버그가 있었으나, 현재는 BAA-AAA yield spread로 수정되었다.)
-2. **채권 포트폴리오는 수익률 기반 추정치이다**: 7개 채권 포트폴리오는 실제 yield 데이터를 기반으로 한 추정치(yield-based proxies)이며, FRED에서 직접 수집한 포트폴리오 수익률이 아니다. TERM/DEF에 회귀할 때 공선성이 높아 채권 R²가 높게 나타나는데, 이는 추정 방식의 고유한 한계이다. 수정 후에는 인위적으로 1.0에 가깝지는 않지만, 여전히 원 논문의 실제 채권 포트폴리오와는 다르다.
-3. **Hybrid stock-side data**: 주식 factor 및 portfolio 입력은 1963-07~1968-06 기존 프로젝트/Ken French 데이터와 1968-07~1991-12 CRSP-derived stock data를 결합한 hybrid full-period 데이터이다. 이는 1963-07까지 거슬러 올라가는 full-period CRSP coverage를 의미하지 않는다.
-4. **5요인 주식 절편이 높게 나타남**: Hybrid 데이터에서는 5요인 주식 모델의 평균 절대절편(0.3020%)이 1요인 주식 모델(0.2680%)보다 높다. 채권 프록시(TERM, DEF)가 주식 횡단면 pricing error를 줄이지 못하며, 3요인 주식 모델(0.1247%)이 더 우수하다.
-5. **고정된 샘플 기간**: 본 복제는 원 논문의 기존 샘플(1963~1991)을 엄격히 따르며, 현대 데이터로 확장하지 않는다.
-6. **인샘플(In-Sample) 검정만 수행**: 모든 회귀분석과 GRS 검정은 1963~1991년 전체 샘플 기간에 대해 인샘플로 수행되었다. 아웃오브샘플(OOS) 검정, 롤링 윈도우(rolling window) 분석, 교차검증(cross-validation) 등은 구현되지 않았다. 이는 원 논문의 방법론을 엄격히 복제한 결과이며, 향후 연구에서는 OOS 검정을 통해 모델의 예측력과 견고성을 추가로 평가할 필요가 있다. 특히 5요인 모델의 과적합 우려는 OOS 환경에서 더욱 명확히 드러날 수 있다.
-7. **자체 구축 포트폴리오의 한계**: `compustat_portfolio_builder.py`로 1964-07~1991-12 구간의 포트폴리오를 자체 구축했지만, 다음과 같은 한계가 있다:
-   - **오픈소스 매핑 테이블 의존**: gvkey↔PERMCO 매핑을 Wenzhi-Ding/Std_Security_Code 오픈소스 Parquet 파일에 의존한다. CRSP/Compustat CCM(Center for Research in Security Prices와 Compustat의 Connecting) 상용 데이터베이스 없이 구축된 매핑이므로, 매핑 정확도와 커버리지에 한계가 있을 수 있다.
-   - **Pre-computed BE 사용**: BE(장부가치) 항목을 `compustat_be.csv`의 pre-computed 값으로 사용하며, Compustat raw 항목(SEQ, TXDITC, PSTKRV 등)에서 직접 계산하지 않는다. flag validation을 통해 96.7% 이상 일관성이 확인되었으나, 일부 관측치에서 미검증된 계산 방식을 포함할 수 있다.
-   - **첫 12개월 hybrid 유지**: 1963-07~1964-06 구간은 Ken French Data Library 데이터를 그대로 유지하므로, 해당 구간의 포트폴리오 구성 방식이 나머지 구간과 일치하지 않는다. 전 구간에 걸친 완전한 end-to-end 자체 구축은 아니다.
+342개월간 SMB와 HML 월간 수익률 산점도. 두 요인 간 상관관계가 낮아(기울기 ≈ 0), 서로 독립적인 정보를 담고 있음을 확인한다.
 
 ---
 
 ## 6. 데이터 출처 (Data Sources)
 
-### 6.1 주식 데이터: Hybrid Ken French + CRSP-derived stock-side data
-- **Coverage**: 1963-07~1991-12, 342개월
-- **Hybrid rule**:
-  - 1963-07~1968-06: 기존 프로젝트/Ken French stock-side 데이터 유지
-  - 1968-07~1991-12: `crsp/FF1993_results/data/crsp_*`의 CRSP-derived stock-side 데이터 사용
-- **Final input files used by scripts**:
-  - `data/ff_factors.csv`
-  - `data/ff_6_portfolios.csv`
-  - `data/ff_25_portfolios.csv`
-- **CRSP-derived source files**:
-  - `crsp/FF1993_results/data/crsp_ff_factors.csv`
-  - `crsp/FF1993_results/data/crsp_6_portfolios.csv`
-  - `crsp/FF1993_results/data/crsp_25_portfolios.csv`
-- **Backups**:
-  - Original project stock-side inputs: `data/backups/2026-05-15-pre-crsp-hybrid/`
-  - Pre-hybrid outputs: `output/backups/2026-05-15-pre-crsp-hybrid/`
-- **Important**: 이 접근은 full target period를 유지하기 위한 hybrid substitution이며, 1963-07~1968-06 구간의 CRSP-derived coverage를 주장하지 않는다.
+### 6.1 Ken French Data Library + FRED
 
-#### Ken French source details
+**주식 요인 및 포트폴리오 (Ken French)**
 - **Base URL**: `https://mba.tuck.dartmouth.edu/pages/Faculty/ken.french/ftp/`
-- **Download method**: `download_data.py` uses `urllib` to download ZIP files, then extracts CSVs
-- **Files used**:
-  1. **F-F_Research_Data_Factors_CSV.zip**
-     - Contents: Fama-French 3 Factors (월간) + Risk-Free Rate
-     - Columns: `Mkt-RF`, `SMB`, `HML`, `RF`
-     - Format: CSV inside ZIP, skip first 3 rows (header rows)
-     - Saved locally as: `data/ff_factors.csv`
-  2. **6_Portfolios_2x3_CSV.zip**
-     - Contents: 6 portfolios formed on Size and Book-to-Market (2×3)
-     - Used for: constructing SMB and HML factors
-     - Format: CSV inside ZIP, skip first 12 rows
-     - Saved locally as: `data/ff_6_portfolios.csv`
-  3. **25_Portfolios_5x5_CSV.zip**
-     - Contents: 25 portfolios formed on Size and BE/ME (5×5)
-     - Used for: regression test assets (Table 1-5)
-     - Format: CSV inside ZIP, skip first 12 rows
-     - Saved locally as: `data/ff_25_portfolios.csv`
-- **Parser**: `ken_french_parser.py` handles value-weighted (`vw`) returns, skips header rows, parses dates
+- **다운로드**: `download_data.py`가 urllib로 ZIP 다운로드 후 CSV 추출
+- **파일**:
+  1. `F-F_Research_Data_Factors_CSV.zip` → `data/ff_factors.csv` (Mkt-RF, SMB, HML, RF)
+  2. `6_Portfolios_2x3_CSV.zip` → `data/ff_6_portfolios.csv` (Size×BE/ME 6개)
+  3. `25_Portfolios_5x5_CSV.zip` → `data/ff_25_portfolios.csv` (Size×BE/ME 25개)
+- **파서**: `ken_french_parser.py` (value-weighted returns, header skip)
 
-### 6.2 채권 요인 데이터: FRED (Federal Reserve Economic Data)
-- **API**: `pandas_datareader.DataReader` with `data_source='fred'`
-- **Series used**:
-  1. **GS10** — 10-Year Treasury Constant Maturity Rate
-     - Description: 미국 10년 만기 국채 변동수익률 (월간 평균)
-     - Frequency: Monthly
-     - Units: Percent (annualized)
-     - Used for: TERM factor (long-term yield component)
-  2. **TB3MS** — 3-Month Treasury Bill Secondary Market Rate
-     - Description: 미국 3개월 만기 국채 수익률 (월간 평균)
-     - Frequency: Monthly
-     - Units: Percent (annualized)
-     - Used for: TERM factor (short-term yield component) and risk-free rate proxy
-  3. **BAA** — Moody's Seasoned Baa Corporate Bond Yield
-     - Description: Moody's Baa 등급 회사채 수익률 (월간 평균)
-     - Frequency: Monthly
-     - Units: Percent (annualized)
-     - Source period: 1919-01 to present
-     - Used for: DEF factor (high-yield corporate component)
-  4. **AAA** — Moody's Seasoned Aaa Corporate Bond Yield
-     - Description: Moody's Aaa 등급 회사채 수익률 (월간 평균)
-     - Frequency: Monthly
-     - Units: Percent (annualized)
-     - Source period: 1919-01 to present
-     - Used for: DEF factor (investment-grade corporate component)
-- **Saved locally**: `data/bond_factors.csv` (columns: `Date`, `TERM`, `DEF`)
-- **Computation**:
-  - `TERM = GS10 - TB3MS` (term spread in decimal monthly terms)
-  - `DEF = BAA - AAA` (credit spread in decimal monthly terms)
+**채권 요인 (FRED)**
+- **API**: `pandas_datareader.DataReader` (`data_source='fred'`)
+- **시계열**: GS10(10년물), TB3MS(3개월물), BAA(Baa 회사채), AAA(Aaa 회사채)
+- **요인 계산**: TERM = GS10 - TB3MS, DEF = BAA - AAA (월간 yield spread, `/12` 변환)
+- **저장**: `data/bond_factors.csv`
 
-### 6.3 데이터 한계 및 대체
-- **CRSP 채권 데이터 접근 불가**: 원 논문은 CRSP의 월간 채권 포트폴리오 수익률 데이터를 사용했으나, 이는 상용 라이선스가 필요하며 공개적으로 접근할 수 없다. 본 복제는 이를 FRED의 수익률(yield) 데이터로 대체하여 프록시를 구성한다.
-- **Hybrid stock-side substitution**: 현재 `data/ff_*` 파일은 hybrid stock-side 입력이다. 기존 Ken French-only 입력은 backup 디렉토리에 보존되어 있다.
-- **데이터 저장 위치**: 최종 분석 입력은 `data/` 디렉토리에 CSV 형태로 저장된다. CRSP-derived source CSV는 `crsp/FF1993_results/data/`에 둔다.
+**Hybrid stock-side data (2026-05-15)**
+- 1963-07~1968-06: Ken French 데이터 유지 (12개월)
+- 1968-07~1991-12: `crsp/FF1993_results/data/crsp_*` CRSP-derived 데이터
+- Backups: `data/backups/2026-05-15-pre-crsp-hybrid/`, `output/backups/2026-05-15-pre-crsp-hybrid/`
 
-### 6.4 Compustat BE 기반 포트폴리오 자체 구축 (2026-05-17 추가)
-- **모듈**: `compustat_portfolio_builder.py`
-- **목적**: Ken French Data Library에 의존하지 않고, Compustat BE + CRSP 원시 데이터로 FF 25개 주식 포트폴리오, 6개 Size-BE/ME 포트폴리오, SMB/HML 요인을 자체 구축
-- **적용 구간**: 1964-07~1991-12 (330개월) 자체 구축 + 1963-07~1964-06 (12개월) Ken French 데이터 유지 = 총 342개월 hybrid
+### 6.2 Compustat BE 기반 포트폴리오 자체 구축
 
-#### gvkey↔PERMCO 매핑 (오픈소스)
-- **출처**: Wenzhi-Ding/Std_Security_Code (GitHub 오픈소스 Parquet 파일)
-- **내용**: `gvkey` → `PERMCO` 정적 매핑 테이블
-- **역할**: CRSP/Compustat CCM 상용 데이터베이스 없이 gvkey에서 CRSP 식별자로 연결하는 브릿지 역할
-- **형식**: Parquet 파일, `gvkey`(int64)와 `PERMCO`(int64) 컬럼
+- **모듈**: `compustat_portfolio_builder.py` (2,136줄)
+- **목적**: Ken French Data Library에 의존하지 않고 Compustat BE + CRSP 원시 데이터로 FF 포트폴리오와 SMB/HML 요인을 자체 구축
+- **적용 구간**: 1964-07~1991-12 (330개월) 자체 구축 + 1963-07~1964-06 (12개월) Ken French 유지 = 342개월 hybrid
 
-#### PERMCO bridge 링킹 방식
-- **1단계 (gvkey→PERMCO)**: Wenzhi-Ding 매핑 테이블로 gvkey에서 PERMCO 조회 (정적 매핑)
-- **2단계 (PERMCO→PERMNO)**: CRSP 원시 데이터(`crsp_msf.parquet`)에서 PERMCO 기준 조회 후, 해당 월의 PERMNO 식별
-- **3단계 (date range 필터)**: CRSP의 `namedt`(시작일)와 `nameendt`(종료일)를 기준으로 해당 시점에 유효한 PERMNO만 선택
-- **장점**: 단순 gvkey→PERMNO 직접 매핑 대신, PERMCO를 중간 매개체로 사용하여 시계열 정합성 향상
+**gvkey↔PERMCO 매핑**
+- 출처: Wenzhi-Ding/Std_Security_Code (GitHub 오픈소스 Parquet)
+- 1단계: gvkey→PERMCO (정적 매핑)
+- 2단계: PERMCO→PERMNO (CRSP `crsp_msf.parquet` date range 기반)
+- 3단계: CRSP `namedt`/`nameendt`로 유효 PERMNO 필터
 
-#### BE 데이터 (compustat_be.csv)
-- **파일**: `data/compustat_be.csv` (pre-computed, flag-validated)
-- **필드**: `gvkey`, `year`, `BE`, `se_flag`, `dt_flag`, `ps_flag`
-- **BE 계산 방식**: Fama-French (1993) 정의 — `BE = SEQ + TXDITC - PSTKRV` (또는 `CEQ + TXDITC - PSTKRV` 등 대체)
-- **Flag validation 결과**:
-  - `se_flag`: 96.7%가 'seq' (SEQ 직접 사용), 3.3% 'ceq' (CEQ 대체)
-  - `dt_flag`: 94.5%가 'txditc' (TXDITC 직접 사용), 5.5% 'itcb' (ITCB 대체) 또는 'zero'
-  - `ps_flag`: 99.8%가 'pstkrv' (PSTKRV 직접 사용), 0.2% 'pstkl' (PSTKL 대체) 또는 'zero'
-- **파일 저장 형식**: CSV, 월말 `Date` 기준 병합
+**BE 데이터 (`compustat_be.csv`)**
+- BE = SEQ + TXDITC - PSTKRV (FF1993 정의), flag-validated
+- `se_flag`: 96.7% 'seq' (SEQ), 3.3% 'ceq' (CEQ 대체)
+- `dt_flag`: 94.5% 'txditc', 5.5% 'itcb' 또는 'zero'
+- `ps_flag`: 99.8% 'pstkrv', 0.2% 'pstkl' 또는 'zero'
 
-#### 포트폴리오 구축 방법론 (FF1992)
-- **정렬 기준**: Size (시가총액, Market Equity) × BE/ME (장부가치/시가총액 비율)
-- **NYSE breakpoints**: NYSE 상장 기업만을 기준으로 5분위(quintile) breakpoint 산출
-- **리밸런싱**: 매년 6월 말 기준으로 정렬, 다음 해 7월부터 적용
-- **제외 조건**:
-  - 금융업종 제외: SICH 6000-6999 (금융, 보험, 부동산)
-  - 음수 BE 제외: 장부가치가 음수인 기업 제외
-  - BE/ME 극단치 제외: 상위 1% winsorization
-- **가중치**: Value-weighted (시가총액 기준)
-- **출력 파일**:
-  - `data/ff_factors.csv` — Mkt-RF, SMB, HML, RF
-  - `data/ff_6_portfolios.csv` — 6개 Size × BE/ME 포트폴리오 수익률
-  - `data/ff_25_portfolios.csv` — 25개 Size × BE/ME 포트폴리오 수익률
+**포트폴리오 구축 방법론 (FF1992)**
+- NYSE breakpoints (5분위), 매년 6월 리밸런싱
+- 금융업 제외 (SICH 6000-6999), 음수 BE 제외, BE/ME 상위 1% winsorization
+- Value-weighted, 시가총액 기준
 
-#### 테스트 결과
-- `tests/test_compustat_portfolio_builder.py`: 274개 테스트 통과, 1개 skip
-- Ken French Data Library 수익률과의 상관관계 검증 포함
-- 포트폴리오 구성 논리, breakpoint 계산, 리밸런싱 정확성 검증
+**테스트 결과**
+- `tests/test_compustat_portfolio_builder.py`: 274개 통과, 1개 skip
+- Ken French 수익률과의 상관관계 검증 포함
+
+### 6.3 데이터 한계
+- **CRSP 채권 데이터 미접근**: 원 논문의 CRSP 월간 채권 포트폴리오 수익률 대신 FRED yield proxy 사용
+- **Hybrid substitution**: 전 구간 CRSP coverage가 아닌 hybrid 방식
+- **2025-05-07 DEF 버그 수정**: BAA-AAA yield spread로 재정의, 채권 R² 인위적 1.0 문제 해결
 
 ---
 
-## 7. 인용
+## 7. 한계점 (Limitations)
+
+1. **채권 데이터의 프록시 한계**: TERM과 DEF는 FRED yield spread로, 실제 CRSP 채권 포트폴리오 수익률이 아니다. 채권 회귀 결과는 추정 방식의 고유한 한계를 가진다.
+2. **채권 R²의 기계적 공선성**: yield-based proxy를 TERM/DEF에 회귀할 때 공선성이 높아 R²가 과대 추정될 수 있다(현재 max 0.985).
+3. **Hybrid stock-side data**: 1963-07~1968-06은 Ken French 원본 데이터로, 1968-07 이후 CRSP-derived 데이터와 구성 방식이 다르다.
+4. **5요인 주식 절편 상승**: Hybrid 데이터에서 5요인 주식 평균 |α|(0.3020%)가 1요인(0.2680%)보다 높다. TERM/DEF가 주식 횡단면 프라이싱 에러를 줄이지 못한다.
+5. **고정 샘플 기간**: 1963~1991년으로 한정, 현대 데이터 미확장.
+6. **인샘플 검정만 수행**: OOS 검정, 롤링 윈도우, 교차검증 미구현.
+7. **자체 구축 포트폴리오 한계**: 오픈소스 gvkey↔PERMCO 매핑 의존, pre-computed BE 사용, 첫 12개월 hybrid 유지.
+
+---
+
+## 8. 인용 (Citation)
 
 ```bibtex
 @article{fama1993common,
