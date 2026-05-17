@@ -753,3 +753,162 @@ class TestBackupManager:
             restored_path = data_dir / filename
             assert restored_path.exists()
             assert restored_path.read_text().startswith('backup-')
+
+
+class TestPortfolioConstructor:
+    """Tests for PortfolioConstructor class."""
+
+    class DummyBEMECalculator:
+        def __init__(self, df=None):
+            self.df = df if df is not None else pd.DataFrame()
+
+        def compute_all(self):
+            return self.df
+
+    class DummyCRSPSource:
+        def __init__(self, df=None):
+            self.df = df if df is not None else pd.DataFrame()
+
+        def load_and_clean(self):
+            return self.df
+
+    def _constructor(self, beme_df=None, crsp_df=None):
+        return compustat_portfolio_builder.PortfolioConstructor(
+            beme_calculator=self.DummyBEMECalculator(beme_df),
+            crsp_source=self.DummyCRSPSource(crsp_df),
+        )
+
+    def _breakpoint_df(self):
+        return pd.DataFrame({
+            'gvkey': range(1, 9),
+            'permno': range(10001, 10009),
+            'permco': range(500, 508),
+            'date': pd.to_datetime(['1964-06-30'] * 8),
+            'year': [1964] * 8,
+            'be': [1.0] * 8,
+            'me': [10.0, 20.0, 30.0, 40.0, 50.0, 1000.0, 1.0, 60.0],
+            'beme': [0.1, 0.2, 0.3, 0.4, 0.5, 9.9, 0.01, 0.6],
+            'sich': [2000] * 8,
+            'is_financial': [False, False, False, False, False, False, True, False],
+            'exchange': [1, 1, 1, 1, 1, 2, 1, 3],
+        })
+
+    def _full_beme_df(self):
+        rows = []
+        permno = 10001
+        size_me = [10.0, 30.0, 50.0, 70.0, 90.0]
+        bm_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+        for size_idx, me in enumerate(size_me, start=1):
+            for bm_idx, beme in enumerate(bm_values, start=1):
+                rows.append({
+                    'gvkey': permno,
+                    'permno': permno,
+                    'permco': permno + 1000,
+                    'date': pd.Timestamp('1964-06-30'),
+                    'year': 1964,
+                    'be': me * beme,
+                    'me': me,
+                    'beme': beme,
+                    'sich': 2000,
+                    'is_financial': False,
+                    'exchange': 1 if size_idx <= 4 else 2,
+                    'size_idx': size_idx,
+                    'bm_idx': bm_idx,
+                })
+                permno += 1
+        return pd.DataFrame(rows)
+
+    def _full_crsp_df(self, beme_df):
+        months = pd.date_range('1964-07-01', '1965-06-01', freq='MS')
+        rows = []
+        for month in months:
+            for row in beme_df.itertuples(index=False):
+                rows.append({
+                    'PERMNO': row.permno,
+                    'date': month,
+                    'RET': 0.001 * row.size_idx + 0.0001 * row.bm_idx,
+                    'PRC': 10.0,
+                    'SHROUT': 100.0,
+                    'PERMCO': row.permco,
+                    'EXCHCD': row.exchange,
+                    'SHRCD': 10,
+                })
+        return pd.DataFrame(rows)
+
+    def test_init(self, monkeypatch):
+        """Test initialization with default and custom calculators."""
+        default_beme = self.DummyBEMECalculator()
+        default_crsp = self.DummyCRSPSource()
+        monkeypatch.setattr(compustat_portfolio_builder, 'BEMECalculator', lambda: default_beme)
+        monkeypatch.setattr(compustat_portfolio_builder, 'CRSPSource', lambda: default_crsp)
+
+        constructor = compustat_portfolio_builder.PortfolioConstructor()
+        assert constructor.beme_calculator is default_beme
+        assert constructor.crsp_source is default_crsp
+
+        custom_beme = self.DummyBEMECalculator()
+        custom_crsp = self.DummyCRSPSource()
+        constructor = compustat_portfolio_builder.PortfolioConstructor(
+            beme_calculator=custom_beme,
+            crsp_source=custom_crsp,
+        )
+        assert constructor.beme_calculator is custom_beme
+        assert constructor.crsp_source is custom_crsp
+
+    def test_compute_nyse_breakpoints_me(self):
+        """Test ME breakpoints use only NYSE non-financial stocks."""
+        constructor = self._constructor()
+        breakpoints = constructor.compute_nyse_breakpoints(self._breakpoint_df(), metric='me')
+
+        assert breakpoints == pytest.approx([18.0, 26.0, 34.0, 42.0])
+
+    def test_compute_nyse_breakpoints_beme(self):
+        """Test BE/ME breakpoints use only NYSE non-financial stocks."""
+        constructor = self._constructor()
+        breakpoints = constructor.compute_nyse_breakpoints(self._breakpoint_df(), metric='beme')
+
+        assert breakpoints == pytest.approx([0.18, 0.26, 0.34, 0.42])
+
+    def test_assign_portfolios(self):
+        """Test stocks are assigned to Ken French 25-portfolio labels."""
+        df = pd.DataFrame({
+            'me': [10.0, 50.0, 90.0],
+            'beme': [0.1, 0.5, 0.9],
+        })
+        constructor = self._constructor()
+
+        labels = constructor.assign_portfolios(df, [20.0, 40.0, 60.0, 80.0], [0.2, 0.4, 0.6, 0.8])
+
+        assert labels.tolist() == ['SMALL LoBM', 'ME3 BM3', 'BIG HiBM']
+
+    def test_build_25_portfolios_synthetic(self):
+        """Test full synthetic pipeline returns 12 months by 25 columns."""
+        beme_df = self._full_beme_df()
+        crsp_df = self._full_crsp_df(beme_df)
+        constructor = self._constructor(beme_df, crsp_df)
+
+        portfolios = constructor.build_25_portfolios()
+
+        assert portfolios.shape == (12, 25)
+        assert list(portfolios.columns) == constructor.PORTFOLIO_COLUMNS
+        assert portfolios.index.name == 'Date'
+        assert portfolios.index[0] == '1964-07'
+        assert portfolios.index[-1] == '1965-06'
+        assert portfolios['SMALL LoBM'].iloc[0] == pytest.approx(0.11)
+        assert portfolios['BIG HiBM'].iloc[0] == pytest.approx(0.55)
+
+    def test_build_25_portfolios_monotonic(self):
+        """Test stocks assigned to SMALL portfolios have lower ME than BIG portfolios."""
+        beme_df = self._full_beme_df()
+        constructor = self._constructor()
+        size_bps = constructor.compute_nyse_breakpoints(beme_df, metric='me')
+        beme_bps = constructor.compute_nyse_breakpoints(beme_df, metric='beme')
+        labels = constructor.assign_portfolios(beme_df, size_bps, beme_bps)
+        assigned = beme_df.assign(portfolio=labels)
+
+        small_labels = [label for (size, _), label in constructor.PORTFOLIO_LABELS.items() if size == 1]
+        big_labels = [label for (size, _), label in constructor.PORTFOLIO_LABELS.items() if size == 5]
+        small_mean_me = assigned.loc[assigned['portfolio'].isin(small_labels), 'me'].mean()
+        big_mean_me = assigned.loc[assigned['portfolio'].isin(big_labels), 'me'].mean()
+
+        assert small_mean_me < big_mean_me

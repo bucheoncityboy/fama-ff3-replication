@@ -18,7 +18,7 @@ import hashlib
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 
 class MappingManager:
@@ -562,6 +562,223 @@ class BEMECalculator:
 
         result = df[self.OUTPUT_COLUMNS].sort_values(['year', 'gvkey', 'permco', 'permno', 'date']).reset_index(drop=True)
         self._print_diagnostics(before_count, removals, result)
+        return result
+
+
+class PortfolioConstructor:
+    """Constructs 25 Size-BE/ME portfolios using FF1992/FF1993 June sorts."""
+
+    PORTFOLIO_COLUMNS = [
+        'SMALL LoBM', 'ME1 BM2', 'ME1 BM3', 'ME1 BM4', 'SMALL HiBM',
+        'ME2 BM1', 'ME2 BM2', 'ME2 BM3', 'ME2 BM4', 'ME2 BM5',
+        'ME3 BM1', 'ME3 BM2', 'ME3 BM3', 'ME3 BM4', 'ME3 BM5',
+        'ME4 BM1', 'ME4 BM2', 'ME4 BM3', 'ME4 BM4', 'ME4 BM5',
+        'BIG LoBM', 'ME5 BM2', 'ME5 BM3', 'ME5 BM4', 'BIG HiBM',
+    ]
+
+    PORTFOLIO_LABELS = {
+        (1, 1): 'SMALL LoBM', (1, 2): 'ME1 BM2', (1, 3): 'ME1 BM3',
+        (1, 4): 'ME1 BM4', (1, 5): 'SMALL HiBM',
+        (2, 1): 'ME2 BM1', (2, 2): 'ME2 BM2', (2, 3): 'ME2 BM3',
+        (2, 4): 'ME2 BM4', (2, 5): 'ME2 BM5',
+        (3, 1): 'ME3 BM1', (3, 2): 'ME3 BM2', (3, 3): 'ME3 BM3',
+        (3, 4): 'ME3 BM4', (3, 5): 'ME3 BM5',
+        (4, 1): 'ME4 BM1', (4, 2): 'ME4 BM2', (4, 3): 'ME4 BM3',
+        (4, 4): 'ME4 BM4', (4, 5): 'ME4 BM5',
+        (5, 1): 'BIG LoBM', (5, 2): 'ME5 BM2', (5, 3): 'ME5 BM3',
+        (5, 4): 'ME5 BM4', (5, 5): 'BIG HiBM',
+    }
+
+    def __init__(self, beme_calculator=None, crsp_source=None):
+        """
+        Initialize PortfolioConstructor.
+
+        Args:
+            beme_calculator: Optional preconfigured BEMECalculator instance.
+            crsp_source: Optional preconfigured CRSPSource instance.
+        """
+        self.beme_calculator = beme_calculator or BEMECalculator()
+        self.crsp_source = crsp_source or CRSPSource()
+
+    def compute_nyse_breakpoints(self, beme_df: pd.DataFrame, metric: str = 'me') -> List[float]:
+        """
+        Compute NYSE non-financial quintile breakpoints for ME or BE/ME.
+
+        Args:
+            beme_df: Annual BE/ME snapshot for one June formation year.
+            metric: Either 'me' for size or 'beme' for book-to-market.
+
+        Returns:
+            Four breakpoint values: 20th, 40th, 60th, and 80th percentiles.
+        """
+        if metric not in {'me', 'beme'}:
+            raise ValueError("metric must be either 'me' or 'beme'")
+
+        if beme_df is None or beme_df.empty:
+            return [np.nan, np.nan, np.nan, np.nan]
+
+        df = beme_df.copy()
+        values = pd.to_numeric(df[metric], errors='coerce')
+        exchange = pd.to_numeric(df.get('exchange', pd.Series(index=df.index, dtype='float64')), errors='coerce')
+        financial = df.get('is_financial', pd.Series(False, index=df.index)).fillna(False).astype(bool)
+
+        nyse = values[(exchange == 1) & (~financial) & values.notna() & np.isfinite(values)]
+        if nyse.empty:
+            return [np.nan, np.nan, np.nan, np.nan]
+
+        return [float(nyse.quantile(q)) for q in [0.2, 0.4, 0.6, 0.8]]
+
+    def assign_portfolios(self, beme_df: pd.DataFrame, size_bps: List[float], beme_bps: List[float]) -> pd.Series:
+        """
+        Assign all stocks to 25 Size-BE/ME portfolios using NYSE breakpoints.
+
+        Args:
+            beme_df: Annual BE/ME snapshot for one June formation year.
+            size_bps: ME breakpoints from compute_nyse_breakpoints(..., 'me').
+            beme_bps: BE/ME breakpoints from compute_nyse_breakpoints(..., 'beme').
+
+        Returns:
+            Series of Ken French style portfolio labels.
+        """
+        if beme_df is None or beme_df.empty:
+            return pd.Series(dtype='object')
+
+        size_breaks = np.asarray(size_bps, dtype='float64')
+        beme_breaks = np.asarray(beme_bps, dtype='float64')
+        if len(size_breaks) != 4 or len(beme_breaks) != 4:
+            raise ValueError('size_bps and beme_bps must each contain four breakpoints')
+
+        me_values = pd.to_numeric(beme_df['me'], errors='coerce')
+        beme_values = pd.to_numeric(beme_df['beme'], errors='coerce')
+
+        labels = []
+        invalid_breaks = np.isnan(size_breaks).any() or np.isnan(beme_breaks).any()
+        for me_value, beme_value in zip(me_values, beme_values):
+            if invalid_breaks or pd.isna(me_value) or pd.isna(beme_value):
+                labels.append(pd.NA)
+                continue
+
+            size_group = int(np.searchsorted(size_breaks, me_value, side='left') + 1)
+            beme_group = int(np.searchsorted(beme_breaks, beme_value, side='left') + 1)
+            labels.append(self.PORTFOLIO_LABELS[(size_group, beme_group)])
+
+        return pd.Series(labels, index=beme_df.index, dtype='object')
+
+    def _prepare_beme(self, beme_df: pd.DataFrame) -> pd.DataFrame:
+        """Normalize BE/ME input columns needed for portfolio construction."""
+        df = beme_df.copy()
+        df['date'] = pd.to_datetime(df['date'])
+        if 'year' not in df.columns:
+            df['year'] = df['date'].dt.year
+        df['year'] = pd.to_numeric(df['year'], errors='coerce')
+        df['permno'] = pd.to_numeric(df['permno'], errors='coerce')
+        df['me'] = pd.to_numeric(df['me'], errors='coerce')
+        df['beme'] = pd.to_numeric(df['beme'], errors='coerce')
+        if 'is_financial' not in df.columns:
+            df['is_financial'] = False
+        return df
+
+    def _prepare_crsp(self, crsp_df: pd.DataFrame) -> pd.DataFrame:
+        """Normalize CRSP monthly returns for holding-period calculations."""
+        df = crsp_df.copy()
+        rename_map = {'PERMNO': 'permno', 'PERMCO': 'permco', 'EXCHCD': 'exchange'}
+        df = df.rename(columns={old: new for old, new in rename_map.items() if old in df.columns})
+        df['permno'] = pd.to_numeric(df['permno'], errors='coerce')
+        df['date'] = pd.to_datetime(df['date'])
+        df['_month'] = df['date'].dt.to_period('M').dt.to_timestamp()
+        df['RET'] = pd.to_numeric(df['RET'], errors='coerce')
+        return df
+
+    def _formation_snapshot(self, beme_df: pd.DataFrame, year: int) -> pd.DataFrame:
+        """Return valid non-financial June formation records for one year."""
+        snapshot = beme_df[beme_df['year'] == year].copy()
+        june_snapshot = snapshot[snapshot['date'].dt.month == 6].copy()
+        if not june_snapshot.empty:
+            snapshot = june_snapshot
+
+        financial = snapshot['is_financial'].fillna(False).astype(bool)
+        valid = (
+            (~financial)
+            & snapshot['permno'].notna()
+            & snapshot['me'].notna()
+            & snapshot['beme'].notna()
+            & np.isfinite(snapshot['me'])
+            & np.isfinite(snapshot['beme'])
+            & (snapshot['me'] > 0)
+        )
+        return snapshot[valid].copy()
+
+    def _holding_months(self, formation_year: int) -> pd.DatetimeIndex:
+        """Return July t through June t+1 holding months, capped at 1991-12."""
+        start = pd.Timestamp(year=formation_year, month=7, day=1)
+        end = pd.Timestamp(year=formation_year + 1, month=6, day=1)
+        cap = pd.Timestamp(year=1991, month=12, day=1)
+        if formation_year <= 1991:
+            end = min(end, cap)
+        return pd.date_range(start, end, freq='MS')
+
+    def build_25_portfolios(self, beme_df: Optional[pd.DataFrame] = None, crsp_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        Build value-weighted monthly returns for 25 Size-BE/ME portfolios.
+
+        Args:
+            beme_df: Optional annual June BE/ME snapshot. If omitted, BEMECalculator is used.
+            crsp_df: Optional CRSP monthly returns. If omitted, CRSPSource is used.
+
+        Returns:
+            DataFrame indexed by YYYY-MM strings with 25 portfolio return columns.
+            Returns are expressed in percent to match Ken French CSV files.
+        """
+        beme = self.beme_calculator.compute_all() if beme_df is None else beme_df
+        crsp = self.crsp_source.load_and_clean() if crsp_df is None else crsp_df
+
+        if beme is None or crsp is None or beme.empty or crsp.empty:
+            empty = pd.DataFrame(columns=self.PORTFOLIO_COLUMNS)
+            empty.index.name = 'Date'
+            return empty
+
+        beme = self._prepare_beme(beme)
+        crsp = self._prepare_crsp(crsp)
+
+        formation_years = sorted(beme['year'].dropna().astype(int).unique())
+        target_years = [year for year in formation_years if 1964 <= year <= 1991]
+        if target_years:
+            formation_years = target_years
+
+        rows = []
+        row_index = []
+        for formation_year in formation_years:
+            snapshot = self._formation_snapshot(beme, formation_year)
+            if snapshot.empty:
+                continue
+
+            size_bps = self.compute_nyse_breakpoints(snapshot, metric='me')
+            beme_bps = self.compute_nyse_breakpoints(snapshot, metric='beme')
+            assignments = self.assign_portfolios(snapshot, size_bps, beme_bps)
+            formation = snapshot.assign(portfolio=assignments, formation_me=snapshot['me'])
+            formation = formation.dropna(subset=['portfolio', 'formation_me'])
+            if formation.empty:
+                continue
+
+            formation = formation[['permno', 'portfolio', 'formation_me']].copy()
+            for month in self._holding_months(formation_year):
+                month_returns = crsp.loc[crsp['_month'] == month, ['permno', 'RET']]
+                merged = formation.merge(month_returns, on='permno', how='left')
+                valid_returns = merged.dropna(subset=['RET']).copy()
+                valid_returns = valid_returns[valid_returns['formation_me'] > 0]
+
+                row = {column: np.nan for column in self.PORTFOLIO_COLUMNS}
+                for portfolio, group in valid_returns.groupby('portfolio'):
+                    weights = group['formation_me'].astype(float)
+                    returns = group['RET'].astype(float)
+                    if weights.sum() > 0:
+                        row[portfolio] = float(np.average(returns, weights=weights) * 100.0)
+
+                rows.append(row)
+                row_index.append(month.strftime('%Y-%m'))
+
+        result = pd.DataFrame(rows, index=row_index, columns=self.PORTFOLIO_COLUMNS)
+        result.index.name = 'Date'
         return result
 
 
