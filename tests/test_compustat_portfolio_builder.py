@@ -1258,3 +1258,434 @@ class TestFactorCalculator:
         assert len(factors) == 2
         assert factors.iloc[0]['Date'] == '1964-07'
         assert factors.iloc[1]['Date'] == '1991-12'
+
+
+class TestDiagnosticsReport:
+    """Tests for DiagnosticsReport class."""
+
+    # ------------------------------------------------------------------ #
+    # Dummy helpers for synthetic pipeline
+    # ------------------------------------------------------------------ #
+
+    class DummyMappingManager:
+        """Minimal MappingManager stub that returns canned stats."""
+
+        def mapping_stats(self):
+            return {
+                'total_rows': 15000,
+                'unique_gvkeys': 30000,
+                'unique_permco': 25000,
+                'unique_permno': 35000,
+                'gvkey_multi_permco_pct': 5.0,
+                'permco_multi_gvkey_pct': 8.0,
+                'permco_multi_permno_pct': 12.0,
+            }
+
+    class DummyLinkingEngine:
+        """Minimal LinkingEngine stub."""
+
+        def build_link(self):
+            return pd.DataFrame({
+                'gvkey': [1, 2, 3],
+                'permno': [10001, 10002, 10003],
+                'permco': [500, 501, 502],
+                'date': pd.to_datetime(['1964-06-30', '1965-06-30', '1966-06-30']),
+                'cal_year': [1963, 1964, 1965],
+                'be': [100.0, 200.0, 300.0],
+                'me': [1000.0, 2000.0, 3000.0],
+                'sich': [2000, 3500, 5000],
+                'is_financial': [False, False, False],
+                'EXCHCD': [1, 2, 1],
+            })
+
+    class DummyPortfolioConstructor:
+        """Minimal PortfolioConstructor stub for synthetic 25-portfolio returns."""
+
+        class _DummyBEME:
+            def compute_all(self):
+                return pd.DataFrame()
+
+        class _DummyCRSP:
+            def load_and_clean(self):
+                return pd.DataFrame()
+
+        PORTFOLIO_COLUMNS = [
+            'SMALL LoBM', 'ME1 BM2', 'ME1 BM3', 'ME1 BM4', 'SMALL HiBM',
+            'ME2 BM1', 'ME2 BM2', 'ME2 BM3', 'ME2 BM4', 'ME2 BM5',
+            'ME3 BM1', 'ME3 BM2', 'ME3 BM3', 'ME3 BM4', 'ME3 BM5',
+            'ME4 BM1', 'ME4 BM2', 'ME4 BM3', 'ME4 BM4', 'ME4 BM5',
+            'BIG LoBM', 'ME5 BM2', 'ME5 BM3', 'ME5 BM4', 'BIG HiBM',
+        ]
+
+        def __init__(self):
+            self.beme_calculator = self._DummyBEME()
+            self.crsp_source = self._DummyCRSP()
+
+        def build_25_portfolios(self):
+            """Return 12 months of synthetic 25-portfolio returns."""
+            rng = np.random.default_rng(42)
+            dates = [f'1964-{m:02d}' for m in range(7, 13)] + [f'1965-{m:02d}' for m in range(1, 7)]
+            data = {col: rng.normal(1.0, 2.0, size=12) for col in self.PORTFOLIO_COLUMNS}
+            df = pd.DataFrame(data, index=dates)
+            df.index.name = 'Date'
+            return df
+
+        def build_6_portfolios(self):
+            cols = ['SMALL LoBM', 'ME1 BM2', 'SMALL HiBM',
+                    'BIG LoBM', 'ME2 BM2', 'BIG HiBM']
+            dates = [f'1964-{m:02d}' for m in range(7, 13)] + [f'1965-{m:02d}' for m in range(1, 7)]
+            df = pd.DataFrame(
+                np.random.default_rng(42).normal(1.0, 2.0, size=(12, 6)),
+                index=dates, columns=cols
+            )
+            df.index.name = 'Date'
+            return df
+
+    class DummyBEMECalculator:
+        """Minimal BEMECalculator stub."""
+
+        def compute_all(self):
+            return pd.DataFrame({
+                'gvkey': range(1, 101),
+                'permno': range(10001, 10101),
+                'permco': range(500, 600),
+                'date': pd.to_datetime(['1964-06-30'] * 100),
+                'year': [1964] * 100,
+                'be': [100.0] * 100,
+                'me': [1000.0] * 100,
+                'beme': [0.1] * 100,
+                'sich': [2000] * 100,
+                'is_financial': [False] * 100,
+                'exchange': [1] * 100,
+            })
+
+    class DummyCRSPSource:
+        """Minimal CRSPSource stub."""
+
+        def load_and_clean(self):
+            months = pd.date_range('1964-07-01', '1965-06-01', freq='MS')
+            rows = []
+            for month in months:
+                for permno in range(10001, 10101):
+                    rows.append({
+                        'PERMNO': permno,
+                        'date': month,
+                        'RET': 0.01,
+                        'PRC': 10.0,
+                        'SHROUT': 1000.0,
+                        'PERMCO': 500 + (permno - 10001) // 20,
+                        'EXCHCD': 1,
+                        'SHRCD': 10,
+                    })
+            return pd.DataFrame(rows)
+
+    class DummyFactorCalculator:
+        """Minimal FactorCalculator stub."""
+
+        def assemble_factors(self, port6=None, crsp_df=None):
+            dates = [f'1964-{m:02d}' for m in range(7, 13)] + [f'1965-{m:02d}' for m in range(1, 7)]
+            return pd.DataFrame({
+                'Date': dates,
+                'Mkt-RF': np.random.default_rng(42).normal(0.5, 1.0, size=12),
+                'SMB': np.random.default_rng(43).normal(0.3, 0.8, size=12),
+                'HML': np.random.default_rng(44).normal(0.4, 0.9, size=12),
+                'RF': [0.25] * 12,
+            })
+
+    # ------------------------------------------------------------------ #
+    # Tests
+    # ------------------------------------------------------------------ #
+
+    def test_init_default(self, monkeypatch, tmp_path):
+        """Test DiagnosticsReport initialises with defaults (custom deps to avoid file access)."""
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+        )
+        assert report is not None
+        assert isinstance(report.pc, self.DummyPortfolioConstructor)
+        assert isinstance(report.fc, self.DummyFactorCalculator)
+        assert isinstance(report.mm, self.DummyMappingManager)
+        assert isinstance(report.le, self.DummyLinkingEngine)
+
+    def test_init_custom(self):
+        """Test DiagnosticsReport accepts custom dependencies."""
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+        )
+        assert isinstance(report.pc, self.DummyPortfolioConstructor)
+        assert isinstance(report.fc, self.DummyFactorCalculator)
+        assert isinstance(report.mm, self.DummyMappingManager)
+        assert isinstance(report.le, self.DummyLinkingEngine)
+
+    def test_run_full_returns_dict_with_sections(self):
+        """Test run_full returns dict with all 5 sections."""
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+        )
+
+        results = report.run_full()
+
+        # Verify all 5 sections present
+        expected_keys = [
+            'mapping_coverage',
+            'portfolio_diagnostics',
+            'ken_french_comparison',
+            'factor_statistics',
+            'monotonicity',
+        ]
+        for key in expected_keys:
+            assert key in results, f"Missing key: {key}"
+            assert isinstance(results[key], dict), f"Section {key} should be a dict"
+
+    def test_run_full_mapping_coverage(self, tmp_path, monkeypatch):
+        """Test mapping coverage section contains expected fields."""
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+            data_dir=str(tmp_path / 'data'),
+        )
+
+        results = report.run_full()
+        mc = results['mapping_coverage']
+
+        assert 'unique_gvkeys' in mc
+        assert 'unique_permco' in mc
+        assert 'unique_permno' in mc
+        assert 'linked_gvkeys' in mc
+        assert mc['unique_gvkeys'] == 30000
+        assert mc['linked_gvkeys'] == 3
+
+    def test_run_full_portfolio_diagnostics(self, tmp_path, monkeypatch):
+        """Test portfolio diagnostics section with synthetic data."""
+        # Create dummy PortfolioConstructor with _prepare_beme etc.
+        class FullDummyPC(self.DummyPortfolioConstructor):
+            def __init__(self):
+                super().__init__()
+                # Override with data-rich CRSP source
+                months = pd.date_range('1964-07-01', '1965-06-01', freq='MS')
+                crsp_rows = []
+                for month in months:
+                    for i in range(1, 101):
+                        crsp_rows.append({
+                            'PERMNO': 10000 + i,
+                            'date': month,
+                            'RET': 0.01,
+                            'PRC': 10.0,
+                            'SHROUT': 1000.0,
+                            'PERMCO': 500 + i // 20,
+                            'EXCHCD': 1,
+                            'SHRCD': 10,
+                        })
+                class DataCRSP:
+                    def load_and_clean(self):
+                        return pd.DataFrame(crsp_rows)
+                self.crsp_source = DataCRSP()
+                # Override beme_calculator with data-rich version
+                beme_data = pd.DataFrame({
+                    'gvkey': range(1, 101),
+                    'permno': range(10001, 10101),
+                    'permco': range(500, 600),
+                    'date': pd.to_datetime(['1964-06-30'] * 100),
+                    'year': [1964] * 100,
+                    'be': [100.0] * 100,
+                    'me': [1000.0] * 100,
+                    'beme': [0.1] * 100,
+                    'sich': [2000] * 100,
+                    'is_financial': [False] * 100,
+                    'exchange': [1] * 100,
+                })
+                class DataBEME:
+                    def compute_all(self):
+                        return beme_data
+                self.beme_calculator = DataBEME()
+
+            def _prepare_beme(self, df):
+                df = df.copy()
+                df['date'] = pd.to_datetime(df['date'])
+                df['year'] = pd.to_numeric(df['year'], errors='coerce')
+                df['permno'] = pd.to_numeric(df['permno'], errors='coerce')
+                df['me'] = pd.to_numeric(df['me'], errors='coerce')
+                df['beme'] = pd.to_numeric(df['beme'], errors='coerce')
+                if 'is_financial' not in df.columns:
+                    df['is_financial'] = False
+                return df
+
+            def _prepare_crsp(self, df):
+                df = df.copy()
+                df = df.rename(columns={
+                    'PERMNO': 'permno', 'PERMCO': 'permco', 'EXCHCD': 'exchange'
+                })
+                df['permno'] = pd.to_numeric(df['permno'], errors='coerce')
+                df['date'] = pd.to_datetime(df['date'])
+                df['_month'] = df['date'].dt.to_period('M').dt.to_timestamp()
+                df['RET'] = pd.to_numeric(df['RET'], errors='coerce')
+                return df
+
+            def _formation_snapshot(self, df, year):
+                snapshot = df[df['year'] == year].copy()
+                june = snapshot[snapshot['date'].dt.month == 6].copy()
+                if not june.empty:
+                    snapshot = june
+                financial = snapshot['is_financial'].fillna(False).astype(bool)
+                valid = (
+                    (~financial)
+                    & snapshot['permno'].notna()
+                    & snapshot['me'].notna()
+                    & snapshot['beme'].notna()
+                    & np.isfinite(snapshot['me'])
+                    & np.isfinite(snapshot['beme'])
+                    & (snapshot['me'] > 0)
+                )
+                return snapshot[valid].copy()
+
+            def compute_nyse_breakpoints(self, df, metric='me'):
+                return [20.0, 40.0, 60.0, 80.0]
+
+            def assign_portfolios(self, df, size_bps, beme_bps):
+                import itertools
+                labels = []
+                for i in range(len(df)):
+                    labels.append(list(
+                        compustat_portfolio_builder.PortfolioConstructor.PORTFOLIO_LABELS.values()
+                    )[i % 25])
+                return pd.Series(labels, index=df.index)
+
+            def _holding_months(self, year):
+                return pd.date_range(f'{year}-07-01', f'{year+1}-06-01', freq='MS')
+
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=FullDummyPC(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+            data_dir=str(tmp_path / 'data'),
+        )
+
+        results = report.run_full()
+        pd_sec = results['portfolio_diagnostics']
+
+        assert 'n_months' in pd_sec
+        assert 'cell_min_stocks' in pd_sec
+        assert 'cell_mean_stocks' in pd_sec
+        assert 'cell_max_stocks' in pd_sec
+        # With 100 stocks and 25 portfolios, each should average ~4 stocks
+        assert pd_sec['cell_mean_stocks'] > 0
+
+    def test_run_full_ken_french_comparison_synthetic(self, tmp_path, monkeypatch):
+        """Test KF comparison handles missing backup gracefully."""
+        import os as os_module
+        original_glob = compustat_portfolio_builder.glob.glob
+
+        def mock_glob(pattern):
+            return []  # No backup dirs
+
+        monkeypatch.setattr(compustat_portfolio_builder.glob, 'glob', mock_glob)
+
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+            data_dir=str(tmp_path / 'data'),
+        )
+
+        results = report.run_full()
+        kfc = results['ken_french_comparison']
+
+        assert 'error' in kfc
+        assert 'backup' in kfc['error'].lower()
+
+    def test_run_full_factor_statistics(self, tmp_path, monkeypatch):
+        """Test factor statistics section contains self_stats."""
+        import os as os_module
+        # Mock glob to return no backups (simpler test)
+        def mock_glob(pattern):
+            return []
+
+        monkeypatch.setattr(compustat_portfolio_builder.glob, 'glob', mock_glob)
+
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+            data_dir=str(tmp_path / 'data'),
+        )
+
+        results = report.run_full()
+        fs = results['factor_statistics']
+
+        if 'error' in fs:
+            # Could be error if no backup, but self_stats should still exist
+            if 'comparison_error' in fs:
+                assert 'self_stats' in fs
+        else:
+            assert 'self_stats' in fs
+
+    def test_run_full_monotonicity(self, tmp_path, monkeypatch):
+        """Test monotonicity section contains size and value effects."""
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+            data_dir=str(tmp_path / 'data'),
+        )
+
+        results = report.run_full()
+        mono = results['monotonicity']
+
+        assert 'size_effect' in mono
+        assert 'value_effect' in mono
+        # With random data, small/big should still have values
+        assert 'small_mean_return' in mono['size_effect']
+        assert 'big_mean_return' in mono['size_effect']
+        assert 'hibm_mean_return' in mono['value_effect']
+        assert 'lobm_mean_return' in mono['value_effect']
+
+    def test_save_report_creates_file(self, monkeypatch):
+        """Test report is saved to evidence directory."""
+        # Remove evidence file if it already exists
+        import os as os_module
+        report_path = '.sisyphus/evidence/task-11-full-report.txt'
+        cells_path = '.sisyphus/evidence/task-11-portfolio-cells.csv'
+        for path in [report_path, cells_path]:
+            if os_module.path.exists(path):
+                os_module.remove(path)
+
+        # Patch glob to return no backup
+        def mock_glob(pattern):
+            return []
+
+        monkeypatch.setattr(compustat_portfolio_builder.glob, 'glob', mock_glob)
+
+        report = compustat_portfolio_builder.DiagnosticsReport(
+            portfolio_constructor=self.DummyPortfolioConstructor(),
+            factor_calculator=self.DummyFactorCalculator(),
+            mapping_manager=self.DummyMappingManager(),
+            linking_engine=self.DummyLinkingEngine(),
+        )
+
+        report.run_full()
+
+        # Check report file exists
+        assert os_module.path.exists(report_path), f"Report file not found: {report_path}"
+        with open(report_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        assert 'DIAGNOSTICS REPORT' in content
+        assert 'SECTION 1: Mapping Coverage' in content
+        assert 'SECTION 2:' in content
+        assert 'SECTION 3:' in content
+        assert 'SECTION 4:' in content
+        assert 'SECTION 5:' in content

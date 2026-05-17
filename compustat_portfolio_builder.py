@@ -13,13 +13,14 @@ Classes:
 
 import os
 import io
+import glob
 import requests
 import shutil
 import hashlib
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 
 class MappingManager:
@@ -1286,6 +1287,686 @@ class FactorCalculator:
         result.index.name = 'Date'
 
         return result
+
+
+class DiagnosticsReport:
+    """Generates comprehensive quality diagnostics for self-constructed portfolios.
+
+    Runs five diagnostic sections:
+    1. Mapping coverage (gvkey↔PERMCO bridge statistics)
+    2. Portfolio diagnostics (stock counts per cell across 25 portfolios)
+    3. Ken French comparison (correlation with original Ken French data)
+    4. Factor statistics (mean, std, t-stat; MAD/correlation vs Ken French)
+    5. Size/BE-ME monotonicity (verification of FF1993 effects)
+    """
+
+    PORTFOLIO_COLUMNS_25 = [
+        'SMALL LoBM', 'ME1 BM2', 'ME1 BM3', 'ME1 BM4', 'SMALL HiBM',
+        'ME2 BM1', 'ME2 BM2', 'ME2 BM3', 'ME2 BM4', 'ME2 BM5',
+        'ME3 BM1', 'ME3 BM2', 'ME3 BM3', 'ME3 BM4', 'ME3 BM5',
+        'ME4 BM1', 'ME4 BM2', 'ME4 BM3', 'ME4 BM4', 'ME4 BM5',
+        'BIG LoBM', 'ME5 BM2', 'ME5 BM3', 'ME5 BM4', 'BIG HiBM',
+    ]
+
+    def __init__(
+        self,
+        portfolio_constructor: Optional[object] = None,
+        factor_calculator: Optional[object] = None,
+        mapping_manager: Optional[object] = None,
+        linking_engine: Optional[object] = None,
+        data_dir: str = 'data',
+    ):
+        """
+        Initialize DiagnosticsReport.
+
+        Args:
+            portfolio_constructor: Optional preconfigured PortfolioConstructor.
+            factor_calculator: Optional preconfigured FactorCalculator.
+            mapping_manager: Optional preconfigured MappingManager.
+            linking_engine: Optional preconfigured LinkingEngine.
+            data_dir: Data directory path.
+        """
+        self.pc = portfolio_constructor or PortfolioConstructor()
+        self.fc = factor_calculator or FactorCalculator(portfolio_constructor=self.pc)
+        self.mm = mapping_manager or MappingManager(cache_dir=data_dir)
+        self.le = linking_engine or LinkingEngine()
+        self.data_dir = data_dir
+
+        # Auto-detect most recent pre-compustat backup directory
+        backup_glob = os.path.join(data_dir, 'backups', '*-pre-compustat')
+        backup_dirs = sorted(glob.glob(backup_glob))
+        self.backup_dir = backup_dirs[-1] if backup_dirs else None
+
+    def run_full(self) -> Dict:
+        """
+        Run all five diagnostic sections and return results.
+
+        Returns:
+            Dictionary with keys for each diagnostic section.
+            Results are printed to console and saved as evidence files.
+        """
+        results: Dict = {}
+
+        print("\n" + "=" * 70)
+        print("DIAGNOSTICS REPORT: Self-Constructed Portfolios")
+        print("=" * 70)
+
+        results['mapping_coverage'] = self._mapping_coverage()
+        results['portfolio_diagnostics'] = self._portfolio_diagnostics()
+        results['ken_french_comparison'] = self._ken_french_comparison()
+        results['factor_statistics'] = self._factor_statistics()
+        results['monotonicity'] = self._monotonicity_check()
+
+        self._print_report(results)
+        self._save_report(results)
+
+        return results
+
+    # ------------------------------------------------------------------ #
+    # Section 1: Mapping Coverage
+    # ------------------------------------------------------------------ #
+
+    def _mapping_coverage(self) -> Dict:
+        """Report gvkey↔PERMCO↔PERMNO mapping coverage statistics."""
+        print("\n" + "-" * 70)
+        print("SECTION 1: Mapping Coverage")
+        print("-" * 70)
+
+        try:
+            stats = self.mm.mapping_stats()
+        except (FileNotFoundError, Exception) as exc:
+            result = {'error': str(exc)}
+            print(f"  ERROR: Could not compute mapping stats: {exc}")
+            return result
+
+        result = {
+            'total_mapping_rows': stats['total_rows'],
+            'unique_gvkeys': stats['unique_gvkeys'],
+            'unique_permco': stats['unique_permco'],
+            'unique_permno': stats['unique_permno'],
+            'gvkey_multi_permco_pct': stats['gvkey_multi_permco_pct'],
+            'permco_multi_gvkey_pct': stats['permco_multi_gvkey_pct'],
+        }
+        print(f"  Total mapping rows : {stats['total_rows']:>8,}")
+        print(f"  Unique gvkeys      : {stats['unique_gvkeys']:>8,}")
+        print(f"  Unique PERMCO      : {stats['unique_permco']:>8,}")
+        print(f"  Unique PERMNO      : {stats['unique_permno']:>8,}")
+        print(f"  gvkey→multi-PERMCO : {stats['gvkey_multi_permco_pct']:>7.2f}%")
+        print(f"  PERMCO→multi-gvkey : {stats['permco_multi_gvkey_pct']:>7.2f}%")
+
+        # Also report LinkingEngine coverage
+        try:
+            linked = self.le.build_link()
+            if linked is not None and not linked.empty:
+                n_gvkey = linked['gvkey'].nunique()
+                n_permno = linked['permno'].nunique()
+                n_permco = linked['permco'].nunique()
+                result['linked_gvkeys'] = int(n_gvkey)
+                result['linked_permnos'] = int(n_permno)
+                result['linked_permcos'] = int(n_permco)
+                print(f"  Linked gvkeys      : {n_gvkey:>8,}")
+                print(f"  Linked PERMNOs     : {n_permno:>8,}")
+                print(f"  Linked PERMCOs     : {n_permco:>8,}")
+            else:
+                result['linked_gvkeys'] = 0
+                result['linked_permnos'] = 0
+                result['linked_permcos'] = 0
+                print("  Linked data        : (empty — no link available)")
+        except (Exception, ) as exc:
+            result['link_error'] = str(exc)
+            print(f"  Link build error   : {exc}")
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Section 2: Portfolio Diagnostics — stock counts per cell
+    # ------------------------------------------------------------------ #
+
+    def _portfolio_diagnostics(self) -> Dict:
+        """Count stocks per portfolio per month across all formation years."""
+        print("\n" + "-" * 70)
+        print("SECTION 2: Portfolio Diagnostics — Stock Counts Per Cell")
+        print("-" * 70)
+
+        try:
+            beme = self.pc.beme_calculator.compute_all()
+            crsp = self.pc.crsp_source.load_and_clean()
+        except (FileNotFoundError, Exception) as exc:
+            result: Dict = {'error': str(exc)}
+            print(f"  ERROR: Could not compute portfolio diagnostics: {exc}")
+            return result
+
+        if beme.empty or crsp.empty:
+            result = {'error': 'BE/ME or CRSP data is empty'}
+            print("  ERROR: BE/ME or CRSP data is empty")
+            return result
+
+        beme = self.pc._prepare_beme(beme) if hasattr(self.pc, '_prepare_beme') else beme
+        crsp = self.pc._prepare_crsp(crsp) if hasattr(self.pc, '_prepare_crsp') else crsp
+
+        formation_years = sorted(beme['year'].dropna().astype(int).unique())
+        target_years = [y for y in formation_years if 1964 <= y <= 1991]
+        if target_years:
+            formation_years = target_years
+
+        # Build stock counts: for each formation year and holding month,
+        # count stocks assigned to each portfolio that have valid returns
+        count_records = []
+        for formation_year in formation_years:
+            snapshot = self.pc._formation_snapshot(beme, formation_year)
+            if snapshot.empty:
+                continue
+
+            size_bps = self.pc.compute_nyse_breakpoints(snapshot, metric='me')
+            beme_bps = self.pc.compute_nyse_breakpoints(snapshot, metric='beme')
+            assignments = self.pc.assign_portfolios(snapshot, size_bps, beme_bps)
+            formation = snapshot.assign(portfolio=assignments, formation_me=snapshot['me'])
+            formation = formation.dropna(subset=['portfolio', 'formation_me'])
+            if formation.empty:
+                continue
+
+            formation = formation[['permno', 'portfolio', 'formation_me']].copy()
+            for month in self.pc._holding_months(formation_year):
+                month_returns = crsp.loc[crsp['_month'] == month, ['permno', 'RET']]
+                merged = formation.merge(month_returns, on='permno', how='left')
+                valid_returns = merged.dropna(subset=['RET']).copy()
+                valid_returns = valid_returns[valid_returns['formation_me'] > 0]
+
+                for portfolio, group in valid_returns.groupby('portfolio'):
+                    count_records.append({
+                        'month': month.strftime('%Y-%m'),
+                        'portfolio': portfolio,
+                        'stock_count': len(group),
+                    })
+
+        if not count_records:
+            result = {'cell_counts_empty': True}
+            print("  No portfolio cell counts available.")
+            return result
+
+        counts_df = pd.DataFrame(count_records)
+
+        # Per-portfolio summary statistics
+        summary = (
+            counts_df.groupby('portfolio')['stock_count']
+            .agg(['min', 'max', 'mean', 'count'])
+            .round(1)
+        )
+        summary.columns = ['min_stocks', 'max_stocks', 'mean_stocks', 'n_months']
+
+        # Identify empty cells (portfolios with 0 stocks in some months)
+        all_portfolios = self.PORTFOLIO_COLUMNS_25
+        all_months = sorted(counts_df['month'].unique())
+        all_combos = pd.MultiIndex.from_product(
+            [all_months, all_portfolios],
+            names=['month', 'portfolio']
+        )
+        full_grid = (
+            counts_df.set_index(['month', 'portfolio'])
+            .reindex(all_combos)
+            .fillna(0)
+            .reset_index()
+        )
+        empty_cells = full_grid[full_grid['stock_count'] == 0]
+        n_empty = len(empty_cells)
+
+        # Compute min/mean/max across all cells
+        nonzero = full_grid[full_grid['stock_count'] > 0]
+        cell_min = int(nonzero['stock_count'].min()) if not nonzero.empty else 0
+        cell_mean = float(nonzero['stock_count'].mean()) if not nonzero.empty else 0.0
+        cell_max = int(nonzero['stock_count'].max()) if not nonzero.empty else 0
+        total_months = len(all_months)
+
+        print(f"  Total months in sample    : {total_months}")
+        print(f"  Total (portfolio×month)   : {len(full_grid):,}")
+        print(f"  Empty cells (0 stocks)    : {n_empty}")
+        print(f"  Non-empty cell min stocks : {cell_min}")
+        print(f"  Non-empty cell mean stocks: {cell_mean:.1f}")
+        print(f"  Non-empty cell max stocks : {cell_max}")
+        print(f"\n  Per-portfolio summary (mean stocks per month):")
+        for portfolio in all_portfolios:
+            if portfolio in summary.index:
+                s = summary.loc[portfolio]
+                print(f"    {portfolio:15s} : min={int(s['min_stocks']):3d}  "
+                      f"max={int(s['max_stocks']):3d}  "
+                      f"mean={s['mean_stocks']:5.1f}")
+            else:
+                print(f"    {portfolio:15s} : (no data)")
+
+        result = {
+            'n_months': total_months,
+            'n_cells_total': len(full_grid),
+            'n_empty_cells': n_empty,
+            'cell_min_stocks': cell_min,
+            'cell_mean_stocks': cell_mean,
+            'cell_max_stocks': cell_max,
+            'per_portfolio_summary': summary.to_dict(),
+            'empty_cells': empty_cells[['month', 'portfolio']].to_dict('records')
+            if n_empty > 0 else [],
+        }
+
+        # Save the detailed cell counts for evidence
+        full_grid.to_csv(
+            '.sisyphus/evidence/task-11-portfolio-cells.csv',
+            index=False
+        )
+        print(f"\n  Cell counts saved to: .sisyphus/evidence/task-11-portfolio-cells.csv")
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Section 3: Ken French Comparison — 25 portfolio return correlations
+    # ------------------------------------------------------------------ #
+
+    def _ken_french_comparison(self) -> Dict:
+        """Compare self-constructed 25 portfolio returns with original KF data."""
+        print("\n" + "-" * 70)
+        print("SECTION 3: Ken French Comparison — 25 Portfolio Correlations")
+        print("-" * 70)
+
+        # Build self-constructed portfolios
+        try:
+            our_25 = self.pc.build_25_portfolios()
+        except Exception as exc:
+            result: Dict = {'error': f'Could not build self-constructed portfolios: {exc}'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        if our_25 is None or our_25.empty:
+            result = {'error': 'Self-constructed portfolios are empty'}
+            print("  ERROR: Self-constructed portfolios are empty")
+            return result
+
+        # Load original Ken French data from backup
+        if self.backup_dir is None:
+            result = {'error': 'No backup directory found for original Ken French data'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        backup_25_path = os.path.join(self.backup_dir, 'ff_25_portfolios.csv')
+        if not os.path.exists(backup_25_path):
+            result = {'error': f'Backup file not found: {backup_25_path}'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        kf_25 = _normalize_month_index(pd.read_csv(backup_25_path))
+
+        # Find overlapping date range
+        common_dates = our_25.index.intersection(kf_25.index)
+        if len(common_dates) == 0:
+            result = {'error': 'No overlapping dates between self-constructed and Ken French data'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        print(f"  Overlap period: {common_dates[0]} to {common_dates[-1]} ({len(common_dates)} months)")
+
+        # Align on common dates and common columns
+        common_cols = [c for c in our_25.columns if c in kf_25.columns]
+        if not common_cols:
+            result = {'error': 'No overlapping portfolio columns'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        our_aligned = our_25.loc[common_dates, common_cols].astype(float)
+        kf_aligned = kf_25.loc[common_dates, common_cols].astype(float)
+
+        # Compute time-series Pearson correlation for each portfolio
+        correlations = {}
+        for col in common_cols:
+            corr_val = our_aligned[col].corr(kf_aligned[col])
+            correlations[col] = corr_val
+
+        corr_values = list(correlations.values())
+        min_corr = float(np.min(corr_values))
+        mean_corr = float(np.mean(corr_values))
+        max_corr = float(np.max(corr_values))
+
+        print(f"  Correlation with original Ken French data (per portfolio):")
+        for col in common_cols:
+            print(f"    {col:15s} : r = {correlations[col]:.4f}")
+
+        print(f"\n  Min correlation : {min_corr:.4f}")
+        print(f"  Mean correlation: {mean_corr:.4f}")
+        print(f"  Max correlation : {max_corr:.4f}")
+
+        # Find worst and best matching portfolios
+        worst_col = min(correlations, key=correlations.get)
+        best_col = max(correlations, key=correlations.get)
+        print(f"  Worst match    : {worst_col} (r={correlations[worst_col]:.4f})")
+        print(f"  Best match     : {best_col} (r={correlations[best_col]:.4f})")
+
+        result = {
+            'overlap_dates': {'start': str(common_dates[0]), 'end': str(common_dates[-1]),
+                              'n_months': len(common_dates)},
+            'n_portfolios': len(common_cols),
+            'correlations': {k: float(v) for k, v in correlations.items()},
+            'min_correlation': min_corr,
+            'mean_correlation': mean_corr,
+            'max_correlation': max_corr,
+            'worst_portfolio': worst_col,
+            'best_portfolio': best_col,
+            'worst_correlation': float(correlations[worst_col]),
+            'best_correlation': float(correlations[best_col]),
+        }
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Section 4: Factor Statistics
+    # ------------------------------------------------------------------ #
+
+    def _factor_statistics(self) -> Dict:
+        """Compute self-constructed factor statistics and compare with KF."""
+        print("\n" + "-" * 70)
+        print("SECTION 4: Factor Statistics")
+        print("-" * 70)
+
+        # Build self-constructed factors
+        try:
+            our_factors = self.fc.assemble_factors()
+        except Exception as exc:
+            result: Dict = {'error': f'Could not build self-constructed factors: {exc}'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        if our_factors is None or our_factors.empty:
+            result = {'error': 'Self-constructed factors are empty'}
+            print("  ERROR: Self-constructed factors are empty")
+            return result
+
+        factor_cols = ['Mkt-RF', 'SMB', 'HML']
+        stats = {}
+        print("  Self-constructed factor statistics:")
+        for col in factor_cols:
+            values = our_factors[col].dropna().astype(float)
+            n = len(values)
+            mean_v = float(values.mean())
+            std_v = float(values.std(ddof=1))
+            t_stat = mean_v / (std_v / np.sqrt(n)) if std_v > 0 else 0.0
+            stats[col] = {
+                'n_obs': n,
+                'mean': mean_v,
+                'std': std_v,
+                't_stat': t_stat,
+                'min': float(values.min()),
+                'max': float(values.max()),
+            }
+            print(f"    {col:8s} : mean={mean_v:7.3f}  std={std_v:7.3f}  "
+                  f"t={t_stat:7.3f}  min={float(values.min()):7.3f}  "
+                  f"max={float(values.max()):7.3f}")
+
+        # Compare SMB/HML with original Ken French factors
+        if self.backup_dir is None:
+            result = {'self_stats': stats, 'comparison_error': 'No backup directory found'}
+            print(f"  WARNING: No backup directory — skipping KF factor comparison")
+            return {**result, 'self_stats': stats}
+
+        backup_factors_path = os.path.join(self.backup_dir, 'ff_factors.csv')
+        if not os.path.exists(backup_factors_path):
+            result = {'self_stats': stats, 'comparison_error': f'Backup factors not found'}
+            print(f"  WARNING: Backup factors not found — skipping comparison")
+            return {**result, 'self_stats': stats}
+
+        kf_factors = _normalize_month_index(pd.read_csv(backup_factors_path))
+        common_dates = our_factors['Date'].unique()
+        kf_dates = kf_factors.index
+        overlap = sorted(set(common_dates) & set(kf_dates))
+        if not overlap:
+            result = {'self_stats': stats, 'comparison_error': 'No overlapping dates'}
+            print("  WARNING: No overlapping dates for factor comparison")
+            return {**result, 'self_stats': stats}
+
+        print(f"\n  Comparison with original Ken French factors "
+              f"({len(overlap)} overlapping months):")
+
+        our_idx = our_factors.set_index('Date')
+        comparison = {}
+        for col in ['SMB', 'HML']:
+            our_vals = our_idx.loc[overlap, col].astype(float)
+            kf_vals = kf_factors.loc[overlap, col].astype(float)
+
+            mad = float(np.abs(our_vals - kf_vals).mean())
+            corr = float(our_vals.corr(kf_vals))
+            our_mean = float(our_vals.mean())
+            kf_mean = float(kf_vals.mean())
+            our_std = float(our_vals.std(ddof=1))
+            kf_std = float(kf_vals.std(ddof=1))
+
+            comparison[col] = {
+                'mad': mad,
+                'correlation': corr,
+                'our_mean': our_mean,
+                'kf_mean': kf_mean,
+                'our_std': our_std,
+                'kf_std': kf_std,
+            }
+            print(f"    {col:8s} : MAD={mad:.4f}  r={corr:.4f}  "
+                  f"our_mean={our_mean:.3f}  KF_mean={kf_mean:.3f}  "
+                  f"our_std={our_std:.3f}  KF_std={kf_std:.3f}")
+
+        result = {
+            'self_stats': stats,
+            'kf_comparison': comparison,
+        }
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Section 5: Size/BE-ME Monotonicity
+    # ------------------------------------------------------------------ #
+
+    def _monotonicity_check(self) -> Dict:
+        """Verify size and value effects in self-constructed portfolios."""
+        print("\n" + "-" * 70)
+        print("SECTION 5: Size/BE-ME Monotonicity Check")
+        print("-" * 70)
+
+        try:
+            port25 = self.pc.build_25_portfolios()
+        except Exception as exc:
+            result: Dict = {'error': f'Could not build portfolios: {exc}'}
+            print(f"  ERROR: {result['error']}")
+            return result
+
+        if port25 is None or port25.empty:
+            result = {'error': 'Portfolios empty'}
+            print("  ERROR: Portfolio data is empty")
+            return result
+
+        # Size effect: SMALL portfolios > BIG portfolios (mean return)
+        small_cols = [c for c in port25.columns if c.startswith('SMALL')]
+        big_cols = [c for c in port25.columns if c.startswith('BIG')]
+        me1_cols = [c for c in port25.columns if c.startswith('ME1')]
+        me5_cols = [c for c in port25.columns if c.startswith('ME5')]
+
+        small_mean = port25[small_cols].values.flatten()
+        big_mean = port25[big_cols].values.flatten()
+        small_mean = small_mean[~np.isnan(small_mean)]
+        big_mean = big_mean[~np.isnan(big_mean)]
+
+        size_effect = {
+            'small_mean_return': float(np.mean(small_mean)) if len(small_mean) > 0 else np.nan,
+            'big_mean_return': float(np.mean(big_mean)) if len(big_mean) > 0 else np.nan,
+        }
+        size_valid = not (np.isnan(size_effect['small_mean_return']) or
+                          np.isnan(size_effect['big_mean_return']))
+        if size_valid:
+            size_effect['small_exceeds_big'] = size_effect['small_mean_return'] > size_effect['big_mean_return']
+            size_effect['spread'] = size_effect['small_mean_return'] - size_effect['big_mean_return']
+        else:
+            size_effect['small_exceeds_big'] = None
+            size_effect['spread'] = np.nan
+
+        print(f"  Size effect (SMALL > BIG):")
+        print(f"    SMALL mean return: {size_effect['small_mean_return']:.3f}%")
+        print(f"    BIG   mean return: {size_effect['big_mean_return']:.3f}%")
+        if size_valid:
+            print(f"    Spread (S-B)     : {size_effect['spread']:.3f}%")
+            print(f"    SMALL > BIG?     : {size_effect['small_exceeds_big']}")
+
+        # Value effect: HiBM portfolios > LoBM portfolios (mean return)
+        hibm_cols = [c for c in port25.columns if c.endswith('HiBM')]
+        lobm_cols = [c for c in port25.columns if c.endswith('LoBM')]
+
+        hibm_mean = port25[hibm_cols].values.flatten()
+        lobm_mean = port25[lobm_cols].values.flatten()
+        hibm_mean = hibm_mean[~np.isnan(hibm_mean)]
+        lobm_mean = lobm_mean[~np.isnan(lobm_mean)]
+
+        value_effect = {
+            'hibm_mean_return': float(np.mean(hibm_mean)) if len(hibm_mean) > 0 else np.nan,
+            'lobm_mean_return': float(np.mean(lobm_mean)) if len(lobm_mean) > 0 else np.nan,
+        }
+        value_valid = not (np.isnan(value_effect['hibm_mean_return']) or
+                           np.isnan(value_effect['lobm_mean_return']))
+        if value_valid:
+            value_effect['hibm_exceeds_lobm'] = value_effect['hibm_mean_return'] > value_effect['lobm_mean_return']
+            value_effect['spread'] = value_effect['hibm_mean_return'] - value_effect['lobm_mean_return']
+        else:
+            value_effect['hibm_exceeds_lobm'] = None
+            value_effect['spread'] = np.nan
+
+        print(f"\n  Value effect (HiBM > LoBM):")
+        print(f"    HiBM mean return: {value_effect['hibm_mean_return']:.3f}%")
+        print(f"    LoBM mean return: {value_effect['lobm_mean_return']:.3f}%")
+        if value_valid:
+            print(f"    Spread (H-L)     : {value_effect['spread']:.3f}%")
+            print(f"    HiBM > LoBM?     : {value_effect['hibm_exceeds_lobm']}")
+
+        result = {
+            'size_effect': size_effect,
+            'value_effect': value_effect,
+        }
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Output: Console report and file saving
+    # ------------------------------------------------------------------ #
+
+    def _print_report(self, results: Dict) -> None:
+        """Print full report summary to console."""
+        print("\n" + "=" * 70)
+        print("DIAGNOSTICS REPORT SUMMARY")
+        print("=" * 70)
+
+        for section, data in results.items():
+            status = "OK" if 'error' not in data else f"ERROR: {data['error']}"
+            print(f"  {section:25s} : {status}")
+
+    def _save_report(self, results: Dict) -> None:
+        """Save full report to evidence file."""
+        import datetime as dt
+
+        evidence_dir = '.sisyphus/evidence'
+        os.makedirs(evidence_dir, exist_ok=True)
+        report_path = os.path.join(evidence_dir, 'task-11-full-report.txt')
+
+        lines = []
+        lines.append("=" * 70)
+        lines.append("DIAGNOSTICS REPORT: Self-Constructed Portfolios")
+        lines.append(f"Generated: {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("=" * 70)
+
+        # Section 1
+        lines.append("\n" + "-" * 70)
+        lines.append("SECTION 1: Mapping Coverage")
+        lines.append("-" * 70)
+        mc = results.get('mapping_coverage', {})
+        if 'error' in mc:
+            lines.append(f"  ERROR: {mc['error']}")
+        else:
+            for k, v in mc.items():
+                lines.append(f"  {k:30s} : {v}")
+
+        # Section 2
+        lines.append("\n" + "-" * 70)
+        lines.append("SECTION 2: Portfolio Diagnostics — Stock Counts Per Cell")
+        lines.append("-" * 70)
+        pd_sec = results.get('portfolio_diagnostics', {})
+        if 'error' in pd_sec:
+            lines.append(f"  ERROR: {pd_sec['error']}")
+        else:
+            lines.append(f"  Total months in sample      : {pd_sec.get('n_months', 'N/A')}")
+            lines.append(f"  Total (portfolio×month)     : {pd_sec.get('n_cells_total', 'N/A')}")
+            lines.append(f"  Empty cells (0 stocks)      : {pd_sec.get('n_empty_cells', 'N/A')}")
+            lines.append(f"  Non-empty cell min stocks   : {pd_sec.get('cell_min_stocks', 'N/A')}")
+            lines.append(f"  Non-empty cell mean stocks  : {pd_sec.get('cell_mean_stocks', 'N/A')}")
+            lines.append(f"  Non-empty cell max stocks   : {pd_sec.get('cell_max_stocks', 'N/A')}")
+
+        # Section 3
+        lines.append("\n" + "-" * 70)
+        lines.append("SECTION 3: Ken French Comparison — 25 Portfolio Correlations")
+        lines.append("-" * 70)
+        kfc = results.get('ken_french_comparison', {})
+        if 'error' in kfc:
+            lines.append(f"  ERROR: {kfc['error']}")
+        else:
+            overlap = kfc.get('overlap_dates', {})
+            lines.append(f"  Overlap: {overlap.get('start', 'N/A')} to {overlap.get('end', 'N/A')} "
+                         f"({overlap.get('n_months', 'N/A')} months)")
+            lines.append(f"  Min correlation : {kfc.get('min_correlation', 'N/A'):.4f}")
+            lines.append(f"  Mean correlation: {kfc.get('mean_correlation', 'N/A'):.4f}")
+            lines.append(f"  Max correlation : {kfc.get('max_correlation', 'N/A'):.4f}")
+            lines.append(f"  Worst match: {kfc.get('worst_portfolio', 'N/A')} "
+                         f"(r={kfc.get('worst_correlation', 'N/A')})")
+            lines.append(f"  Best match : {kfc.get('best_portfolio', 'N/A')} "
+                         f"(r={kfc.get('best_correlation', 'N/A')})")
+            lines.append("  Per-portfolio correlations:")
+            for col, corr in kfc.get('correlations', {}).items():
+                lines.append(f"    {col:15s} : r = {corr:.4f}")
+
+        # Section 4
+        lines.append("\n" + "-" * 70)
+        lines.append("SECTION 4: Factor Statistics")
+        lines.append("-" * 70)
+        fs = results.get('factor_statistics', {})
+        if 'error' in fs:
+            lines.append(f"  ERROR: {fs['error']}")
+        else:
+            lines.append("  Self-constructed factor statistics:")
+            for col, st in fs.get('self_stats', {}).items():
+                lines.append(f"    {col:8s} : mean={st['mean']:7.3f}  std={st['std']:7.3f}  "
+                             f"t={st['t_stat']:7.3f}  min={st['min']:7.3f}  max={st['max']:7.3f}")
+            comp = fs.get('kf_comparison', {})
+            if comp:
+                lines.append("  Comparison vs Ken French (overlap):")
+                for col, cd in comp.items():
+                    lines.append(f"    {col:8s} : MAD={cd['mad']:.4f}  r={cd['correlation']:.4f}  "
+                                 f"our_mean={cd['our_mean']:.3f}  KF_mean={cd['kf_mean']:.3f}")
+
+        # Section 5
+        lines.append("\n" + "-" * 70)
+        lines.append("SECTION 5: Size/BE-ME Monotonicity Check")
+        lines.append("-" * 70)
+        mono = results.get('monotonicity', {})
+        if 'error' in mono:
+            lines.append(f"  ERROR: {mono['error']}")
+        else:
+            se = mono.get('size_effect', {})
+            lines.append(f"  Size effect:")
+            lines.append(f"    SMALL mean return: {se.get('small_mean_return', 'N/A')}%")
+            lines.append(f"    BIG   mean return: {se.get('big_mean_return', 'N/A')}%")
+            lines.append(f"    Spread (S-B)     : {se.get('spread', 'N/A')}%")
+            lines.append(f"    SMALL > BIG?     : {se.get('small_exceeds_big', 'N/A')}")
+            ve = mono.get('value_effect', {})
+            lines.append(f"  Value effect:")
+            lines.append(f"    HiBM mean return: {ve.get('hibm_mean_return', 'N/A')}%")
+            lines.append(f"    LoBM mean return: {ve.get('lobm_mean_return', 'N/A')}%")
+            lines.append(f"    Spread (H-L)    : {ve.get('spread', 'N/A')}%")
+            lines.append(f"    HiBM > LoBM?    : {ve.get('hibm_exceeds_lobm', 'N/A')}")
+
+        lines.append("\n" + "=" * 70)
+        lines.append("END OF REPORT")
+        lines.append("=" * 70)
+
+        report_text = '\n'.join(lines)
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report_text)
+        print(f"\n  Report saved to: {report_path}")
+
+        # Save portfolio cell counts if available
+        pd_sec = results.get('portfolio_diagnostics', {})
+        if not pd_sec.get('cell_counts_empty', False) and 'error' not in pd_sec:
+            cells_path = os.path.join(evidence_dir, 'task-11-portfolio-cells.csv')
+            print(f"  Cell counts saved to: {cells_path}")
 
 
 def _normalize_month_index(df: pd.DataFrame) -> pd.DataFrame:
