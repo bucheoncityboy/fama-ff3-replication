@@ -1,65 +1,52 @@
-# Appendix Table Coverage Audit
+# Table Coverage Audit for Assignment Submission
 
-Reference: `Fama-French 1993 재현 및 정리.md`
+Reference document: `Fama-French 1993 재현 및 정리.md`
 
-This file checks whether the repository implementation follows the appendix table focus, and whether explicitly excluded tables were actually left out.
+This repository is now organized around **assignment submission outputs only**. The canonical deliverables live in `appendix_output/`.
 
-## Summary
+---
 
-| Table | Appendix intent | Current repo status | Verdict |
+## 1. Coverage summary
+
+| Table | Assignment status | Submission file(s) | Note |
 |---|---|---|---|
-| Table 1 (1)(2) | Include 25 stock portfolio descriptive cells | `07_section0_descriptive_stats.py` + `output/table0_descriptive_stats.csv` covers average firm count / market cap / cap share | Partial |
-| Table 1 (3) | Include annual E/P and D/P by 25 size-BE/ME cells | Not implemented in appendix-table form | Missing |
-| Table 2 (1) | Include factor summary + autocorrelation + correlation matrix | `03_section3_statistics.py` covers means/std/t-stats only; autocorrelation/correlation matrix not separately exported | Partial |
-| Table 2 (2)(3) | Include 25 stock excess return mean/std/t-stat cells | Covered in `output/table2_summary.csv` and README summary | Partial |
-| Table 3 stock block | Include 25 stock TERM/DEF regressions | `appendix_output/table3_*` stock-only panels exported | Covered |
-| Table 3 bond block | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 4 stock block | Include 25 stock market-only regressions | `appendix_output/table4_*` stock-only panels exported | Covered |
-| Table 4 bond block | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 5 stock block | Include 25 stock SMB/HML regressions | `appendix_output/table5_*` stock-only panels exported | Covered |
-| Table 5 bond block | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 6 stock block | Include 25 stock FF3 regressions | `appendix_output/table6_*` stock-only panels exported | Covered |
-| Table 6 bond block | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 7a | Include 25 stock FF5 regressions | `appendix_output/table7a_*` stock-only panels exported | Covered |
-| Table 7b | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 8a | Include stock RMO regressions | `08_section8a_rmo_regressions.py` + `output/table8a_rmo.csv` | Covered |
-| Table 8b | Exclude | No separate appendix-facing Table 8b output created | Excluded |
-| Table 9a | Include stock alpha/t(alpha) across models | `appendix_output/table9a_stock_alphas.csv` exported in appendix matrix form | Covered |
-| Table 9b | Exclude | Omitted from `appendix_output/`; remains only in research/master output | Excluded |
-| Table 9c | Additional attempt | `appendix_output/table9c_joint_tests.csv` exported (F-distribution p-values; bootstrap column left blank) | Covered with note |
-| Table 10 | Exclude | No implementation/output | Excluded |
-| Table 11 | Additional attempt | `09_section11_ep_dp_portfolios.py` + `output/table11_ep_dp.csv` | Covered |
+| Table 1 panel 1 | Covered | `appendix_output/table1_panel1_firm_count_market_cap.csv` | 25 stock cells |
+| Table 1 panel 2 | Covered | `appendix_output/table1_panel2_cap_share_firm_count.csv` | 25 stock cells |
+| Table 1 panel 3 | Covered with note | `appendix_output/table1_panel3_ep_dp_reference.md` | Reference snapshot because raw 25-cell E/P, D/P inputs are unavailable |
+| Table 2 panel 1 summary | Covered | `appendix_output/table2_panel1_factor_summary.csv` | mean, std, t, autocorrelation |
+| Table 2 panel 1 correlation matrix | Covered | `appendix_output/table2_panel1_correlation_matrix.csv` | factor correlation matrix |
+| Table 2 panel 2 | Covered | `appendix_output/table2_panel2_stock_mean_std.csv` | stock mean/std grid |
+| Table 2 panel 3 | Covered | `appendix_output/table2_panel3_stock_tstats.csv` | stock t-stat grid |
+| Table 3 stock block | Covered | `appendix_output/table3_*` | stock-only export |
+| Table 3 bond block | Excluded | not exported | intentionally omitted |
+| Table 4 stock block | Covered | `appendix_output/table4_*` | stock-only export |
+| Table 4 bond block | Excluded | not exported | intentionally omitted |
+| Table 5 stock block | Covered | `appendix_output/table5_*` | stock-only export |
+| Table 5 bond block | Excluded | not exported | intentionally omitted |
+| Table 6 stock block | Covered | `appendix_output/table6_*` | stock-only export |
+| Table 6 bond block | Excluded | not exported | intentionally omitted |
+| Table 7a | Covered | `appendix_output/table7a_*` | stock-only export |
+| Table 7b | Excluded | not exported | intentionally omitted |
+| Table 8a | Covered | `appendix_output/table8a_*` | stock-only export |
+| Table 8b | Excluded | not exported | intentionally omitted |
+| Table 9a | Covered | `appendix_output/table9a_stock_alphas.csv` | stock alpha matrix |
+| Table 9b | Excluded | not exported | intentionally omitted |
+| Table 9c | Covered with note | `appendix_output/table9c_joint_tests.csv` | F-test exported, bootstrap column left blank |
+| Table 10 | Excluded | not exported | intentionally omitted |
+| Table 11 | Covered | `appendix_output/table11_ep_dp_long.csv` | long-format export |
 
-## What was clearly done around the requested table-focused scope
+---
 
-- Added `07_section0_descriptive_stats.py` for Appendix Table 1 style descriptive outputs.
-- Added `08_section8a_rmo_regressions.py` for Appendix Table 8a.
-- Added `09_section11_ep_dp_portfolios.py` for Appendix Table 11.
-- Added `10_appendix_table_exports.py` and generated `appendix_output/` so included tables now have assignment-facing stock-only files.
-- Updated `README.md` so GitHub points directly to the appendix-facing output directory.
+## 2. How the submission package is built
 
-## Important caveat
+- `build_submission.py` is the official build entrypoint.
+- `10_appendix_table_exports.py` is the final formatter that assembles appendix-facing tables.
+- Intermediate supporting files are written into the same canonical submission directory, `appendix_output/`.
 
-Several regression CSVs in `output/` are still **research/master outputs**, not strict appendix-facing exports. That means they include both:
+---
 
-1. the stock block that the appendix wants to keep, and
-2. the bond block that the appendix explicitly marks as excluded.
+## 3. Notes
 
-This affects:
-
-- `output/table3_bond.csv`
-- `output/table1_market.csv`
-- `output/table5_smbhml.csv`
-- `output/table4_stock3f.csv`
-- `output/table5_five_factor.csv`
-- `output/intercept_analysis.csv`
-
-The assignment-facing exports in `appendix_output/` solve that separation problem without deleting the research/master outputs.
-
-## Bottom line
-
-- **Yes**: the work did proceed table-first, especially for Table 8a and Table 11.
-- **Yes**: appendix-facing stock-only files now exist for the major included regression tables.
-- **Yes**: excluded bond subtables are omitted from `appendix_output/` and remain only in master research files.
-
-Remaining note: Table 1 panel 3 is provided as a reference snapshot because firm-level 25-cell E/P and D/P construction inputs are not present in this repository.
+1. Table 1 panel 3 is provided as a reference snapshot because the repository does not contain the raw firm-level inputs needed to reconstruct the full 25-cell E/P and D/P grid directly.
+2. Table 9c includes F-distribution based joint alpha tests. The bootstrap probability column is left blank rather than filled with fabricated values.
+3. Excluded subtables are omitted at the file level in `appendix_output/`, not just hidden in README text.

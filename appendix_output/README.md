@@ -28,4 +28,4 @@ This directory contains assignment-facing tables derived from the repository out
 - Table 9b
 - Table 10
 
-The research/master outputs in `output/` remain unchanged and may still contain the full stock+bond panels.
+This directory is the canonical assignment submission output directory.
