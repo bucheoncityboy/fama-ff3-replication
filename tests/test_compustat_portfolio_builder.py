@@ -981,3 +981,280 @@ class TestPortfolioConstructor:
         assert portfolios.notna().all().all()
         assert (portfolios > -100).all().all()
         assert (portfolios < 100).all().all()
+
+
+class TestFactorCalculator:
+    """Tests for FactorCalculator class."""
+
+    class DummyPortfolioConstructor:
+        def __init__(self, port6_df=None):
+            self.port6_df = port6_df if port6_df is not None else pd.DataFrame()
+            # Add required attributes for FactorCalculator
+            self.PORTFOLIO_COLUMNS_6 = [
+                'SMALL LoBM', 'ME1 BM2', 'SMALL HiBM',
+                'BIG LoBM', 'ME2 BM2', 'BIG HiBM',
+            ]
+
+        def build_6_portfolios(self):
+            return self.port6_df
+
+    class DummyCRSPSource:
+        def __init__(self, crsp_df=None):
+            self.crsp_df = crsp_df if crsp_df is not None else pd.DataFrame()
+            self.base_dir = '.'
+
+        def load_and_clean(self):
+            return self.crsp_df
+
+    def test_init(self, monkeypatch):
+        """Test initialization with default and custom dependencies."""
+        default_port = self.DummyPortfolioConstructor()
+        default_crsp = self.DummyCRSPSource()
+        monkeypatch.setattr(compustat_portfolio_builder, 'PortfolioConstructor', lambda: default_port)
+        monkeypatch.setattr(compustat_portfolio_builder, 'CRSPSource', lambda: default_crsp)
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        assert calc.portfolio_constructor is default_port
+        assert calc.crsp_source is default_crsp
+
+        custom_port = self.DummyPortfolioConstructor()
+        custom_crsp = self.DummyCRSPSource()
+        calc = compustat_portfolio_builder.FactorCalculator(
+            portfolio_constructor=custom_port,
+            crsp_source=custom_crsp,
+        )
+        assert calc.portfolio_constructor is custom_port
+        assert calc.crsp_source is custom_crsp
+
+    def test_compute_smb_hml_default(self, monkeypatch):
+        """Test compute_smb_hml uses PortfolioConstructor when port6 is None."""
+        expected_port6 = pd.DataFrame({
+            'SMALL LoBM': [0.1, 0.2],
+            'ME1 BM2': [0.3, 0.4],
+            'SMALL HiBM': [0.5, 0.6],
+            'BIG LoBM': [0.7, 0.8],
+            'ME2 BM2': [0.9, 1.0],
+            'BIG HiBM': [1.1, 1.2],
+        }, index=['1964-07', '1964-08'])
+
+        dummy_port = self.DummyPortfolioConstructor(expected_port6)
+        monkeypatch.setattr(compustat_portfolio_builder, 'PortfolioConstructor', lambda: dummy_port)
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        smb, hml = calc.compute_smb_hml()
+
+        assert len(smb) == 2
+        assert len(hml) == 2
+        # Verify SMB formula: 1/3*(S+ME1+S_Lo) - 1/3*(B+ME2+B_Lo)
+        # Row 0: 1/3*(0.5+0.3+0.1) - 1/3*(1.1+0.9+0.7) = 0.3 - 0.9 = -0.6
+        assert smb.iloc[0] == pytest.approx(-0.6)
+        # Row 1: 1/3*(0.6+0.4+0.2) - 1/3*(1.2+1.0+0.8) = 0.4 - 1.0 = -0.6
+        assert smb.iloc[1] == pytest.approx(-0.6)
+        # Verify HML formula: 1/2*(S_Hi+B_Hi) - 1/2*(S_Lo+B_Lo)
+        # Row 0: 1/2*(0.5+1.1) - 1/2*(0.1+0.7) = 0.8 - 0.4 = 0.4
+        assert hml.iloc[0] == pytest.approx(0.4)
+        # Row 1: 1/2*(0.6+1.2) - 1/2*(0.2+0.8) = 0.9 - 0.5 = 0.4
+        assert hml.iloc[1] == pytest.approx(0.4)
+
+    def test_compute_smb_hml_custom(self):
+        """Test compute_smb_hml uses provided port6 DataFrame."""
+        port6 = pd.DataFrame({
+            'SMALL LoBM': [0.1, 0.2],
+            'ME1 BM2': [0.3, 0.4],
+            'SMALL HiBM': [0.5, 0.6],
+            'BIG LoBM': [0.7, 0.8],
+            'ME2 BM2': [0.9, 1.0],
+            'BIG HiBM': [1.1, 1.2],
+        }, index=['1964-07', '1964-08'])
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        smb, hml = calc.compute_smb_hml(port6)
+
+        assert len(smb) == 2
+        assert len(hml) == 2
+
+    def test_compute_smb_hml_empty(self):
+        """Test compute_smb_hml returns empty Series when port6 is empty."""
+        port6 = pd.DataFrame(columns=[
+            'SMALL LoBM', 'ME1 BM2', 'SMALL HiBM',
+            'BIG LoBM', 'ME2 BM2', 'BIG HiBM'
+        ])
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        smb, hml = calc.compute_smb_hml(port6)
+
+        assert len(smb) == 0
+        assert len(hml) == 0
+        assert smb.dtype == float
+        assert hml.dtype == float
+
+    def test_compute_market_return_default(self, monkeypatch):
+        """Test compute_market_return uses CRSPSource when crsp_df is None."""
+        import numpy as np
+
+        crsp_data = pd.DataFrame({
+            'PERMNO': [10001, 10002, 10001, 10002],
+            'date': pd.to_datetime(['1963-12-31', '1963-12-31', '1964-01-31', '1964-01-31']),
+            'RET': [0.01, 0.03, 0.02, 0.04],
+            'PRC': [10.0, 20.0, 10.0, 20.0],
+            'SHROUT': [1000.0, 500.0, 1000.0, 500.0],
+            'PERMCO': [500, 501, 500, 501],
+            'EXCHCD': [1, 2, 1, 2],
+            'SHRCD': [10, 10, 10, 10],
+        })
+
+        dummy_crsp = self.DummyCRSPSource(crsp_data)
+        calc = compustat_portfolio_builder.FactorCalculator(crsp_source=dummy_crsp)
+        mkt_return = calc.compute_market_return()
+
+        # Month 1964-01: (1000*0.02 + 500*0.04) / (1000 + 500) = 0.03 -> 3.0%
+        assert mkt_return.loc['1964-01'] == pytest.approx(3.0)
+
+    def test_compute_market_return_custom(self):
+        """Test compute_market_return uses provided crsp_df."""
+        crsp_data = pd.DataFrame({
+            'PERMNO': [10001, 10001],
+            'date': pd.to_datetime(['1964-06-30', '1964-07-31']),
+            'RET': [0.01, 0.02],
+            'PRC': [10.0, 10.0],
+            'SHROUT': [1000.0, 1000.0],
+            'PERMCO': [500, 500],
+            'EXCHCD': [1, 1],
+        })
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        mkt_return = calc.compute_market_return(crsp_data)
+
+        assert len(mkt_return) == 2
+        assert mkt_return.name == 'Mkt-RF'
+
+    def test_compute_market_return_empty(self):
+        """Test compute_market_return returns empty Series when crsp_df is empty."""
+        crsp_data = pd.DataFrame()
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        mkt_return = calc.compute_market_return(crsp_data)
+
+        assert len(mkt_return) == 0
+        assert mkt_return.dtype == float
+
+    def test_assemble_factors_default(self, monkeypatch, tmp_path):
+        """Test assemble_factors uses compute_smb_hml and compute_market_return when params are None."""
+        # Create sample port6 data
+        port6 = pd.DataFrame({
+            'SMALL LoBM': [0.1, 0.2],
+            'ME1 BM2': [0.3, 0.4],
+            'SMALL HiBM': [0.5, 0.6],
+            'BIG LoBM': [0.7, 0.8],
+            'ME2 BM2': [0.9, 1.0],
+            'BIG HiBM': [1.1, 1.2],
+        }, index=['1964-07', '1964-08'])
+
+        # Create sample CRSP data
+        crsp_data = pd.DataFrame({
+            'PERMNO': [10001, 10001, 10001, 10001],
+            'date': pd.to_datetime(['1964-06-30', '1964-07-31', '1964-07-01', '1964-08-31']),
+            'RET': [0.01, 0.02, 0.03, 0.04],
+            'PRC': [10.0, 10.0, 10.0, 10.0],
+            'SHROUT': [1000.0, 1000.0, 1000.0, 1000.0],
+            'PERMCO': [500, 500, 500, 500],
+            'EXCHCD': [1, 1, 1, 1],
+            'SHRCD': [10, 10, 10, 10],
+        })
+
+        # Create sample RF data
+        rf_data_path = tmp_path / 'data' / 'ff_factors.csv'
+        rf_data_path.parent.mkdir(parents=True, exist_ok=True)
+        rf_df = pd.DataFrame({
+            'Date': ['1964-07-01', '1964-08-01'],
+            'Mkt-RF': [1.0, 1.0],
+            'SMB': [2.0, 2.0],
+            'HML': [3.0, 3.0],
+            'RF': [0.25, 0.25],
+        })
+        rf_df.to_csv(rf_data_path, index=False)
+
+        # Mock PortfolioConstructor and CRSPSource
+        dummy_port = self.DummyPortfolioConstructor(port6)
+        dummy_crsp = self.DummyCRSPSource(crsp_data)
+        dummy_crsp.base_dir = str(tmp_path)
+        monkeypatch.setattr(compustat_portfolio_builder, 'PortfolioConstructor', lambda: dummy_port)
+        monkeypatch.setattr(compustat_portfolio_builder, 'CRSPSource', lambda: dummy_crsp)
+
+        calc = compustat_portfolio_builder.FactorCalculator(
+            portfolio_constructor=dummy_port,
+            crsp_source=dummy_crsp,
+        )
+
+        factors = calc.assemble_factors()
+
+        # Verify structure
+        assert factors.shape[1] == 5
+        assert list(factors.columns) == ['Date', 'Mkt-RF', 'SMB', 'HML', 'RF']
+        assert factors.index.name == 'Date'
+        assert len(factors) == 2  # Only 1964-07 and 1964-08 in range
+
+    def test_assemble_factors_custom_params(self):
+        """Test assemble_factors uses provided port6 and crsp_df."""
+        port6 = pd.DataFrame({
+            'SMALL LoBM': [0.1],
+            'ME1 BM2': [0.2],
+            'SMALL HiBM': [0.3],
+            'BIG LoBM': [0.4],
+            'ME2 BM2': [0.5],
+            'BIG HiBM': [0.6],
+        }, index=['1964-07'])
+
+        # Create CRSP data with proper structure for lagged_ME calculation
+        # Need multiple observations per PERMNO to compute lagged_ME
+        crsp_data = pd.DataFrame({
+            'PERMNO': [10001, 10001],  # Two months of data
+            'date': pd.to_datetime(['1964-06-30', '1964-07-31']),
+            'RET': [0.01, 0.02],
+            'PRC': [10.0, 10.0],
+            'SHROUT': [1000.0, 1000.0],
+            'PERMCO': [500, 500],
+            'EXCHCD': [1, 1],
+            'SHRCD': [10, 10],
+        })
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        factors = calc.assemble_factors(port6, crsp_data)
+
+        assert len(factors) == 1
+        assert 'Date' in factors.columns
+        assert 'Mkt-RF' in factors.columns
+        assert 'SMB' in factors.columns
+        assert 'HML' in factors.columns
+        assert 'RF' in factors.columns
+
+    def test_assemble_factors_date_range(self):
+        """Test assemble_factors filters to 1964-07 to 1991-12."""
+        port6 = pd.DataFrame({
+            'SMALL LoBM': [0.1, 0.2],
+            'ME1 BM2': [0.3, 0.4],
+            'SMALL HiBM': [0.5, 0.6],
+            'BIG LoBM': [0.7, 0.8],
+            'ME2 BM2': [0.9, 1.0],
+            'BIG HiBM': [1.1, 1.2],
+        }, index=['1964-07', '1991-12'])
+
+        # Create CRSP data with proper structure for lagged_ME calculation
+        crsp_data = pd.DataFrame({
+            'PERMNO': [10001, 10001, 10002, 10002],  # Two stocks, multiple months
+            'date': pd.to_datetime(['1964-06-30', '1964-07-31', '1991-11-30', '1991-12-31']),
+            'RET': [0.01, 0.02, 0.03, 0.04],
+            'PRC': [10.0, 10.0, 20.0, 20.0],
+            'SHROUT': [1000.0, 1000.0, 500.0, 500.0],
+            'PERMCO': [500, 500, 501, 501],
+            'EXCHCD': [1, 1, 2, 2],
+            'SHRCD': [10, 10, 10, 10],
+        })
+
+        calc = compustat_portfolio_builder.FactorCalculator()
+        factors = calc.assemble_factors(port6, crsp_data)
+
+        # Should only include 1964-07 and 1991-12
+        assert len(factors) == 2
+        assert factors.iloc[0]['Date'] == '1964-07'
+        assert factors.iloc[1]['Date'] == '1991-12'

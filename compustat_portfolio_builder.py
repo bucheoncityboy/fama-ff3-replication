@@ -1043,3 +1043,222 @@ class BackupManager:
             print(f"Restored: {filename}")
 
         print(f"Restored from: {backup_path}")
+
+
+class FactorCalculator:
+    """Computes Fama-French factors (SMB, HML) from 6 portfolios and market returns from CRSP."""
+
+    def __init__(self, portfolio_constructor=None, crsp_source=None):
+        """
+        Initialize FactorCalculator.
+
+        Args:
+            portfolio_constructor: Optional preconfigured PortfolioConstructor instance.
+            crsp_source: Optional preconfigured CRSPSource instance.
+        """
+        self.portfolio_constructor = portfolio_constructor or PortfolioConstructor()
+        self.crsp_source = crsp_source or CRSPSource()
+
+    def compute_smb_hml(self, port6: Optional[pd.DataFrame] = None) -> tuple[pd.Series, pd.Series]:
+        """
+        Compute SMB and HML factors from 6 Size-BE/ME portfolios.
+
+        Formulas (Fama-French 1993):
+            SMB = 1/3*(SMALL HiBM + ME1 BM2 + SMALL LoBM) - 1/3*(BIG HiBM + ME2 BM2 + BIG LoBM)
+            HML = 1/2*(SMALL HiBM + BIG HiBM) - 1/2*(SMALL LoBM + BIG LoBM)
+
+        Args:
+            port6: Optional DataFrame with 6 portfolio returns (Date index, percent).
+                   If omitted, PortfolioConstructor.build_6_portfolios() is used.
+
+        Returns:
+            Tuple of (SMB, HML) as pandas Series indexed by Date.
+            Returns are in percent.
+        """
+        if port6 is None:
+            port6 = self.portfolio_constructor.build_6_portfolios()
+
+        if port6 is None or port6.empty:
+            empty_smb = pd.Series(dtype=float)
+            empty_hml = pd.Series(dtype=float)
+            return empty_smb, empty_hml
+
+        # Ensure port6 has the correct column names
+        required_columns = self.portfolio_constructor.PORTFOLIO_COLUMNS_6
+        if not all(col in port6.columns for col in required_columns):
+            raise ValueError(f"port6 must contain columns: {required_columns}")
+
+        # Compute SMB
+        smb = (
+            (1 / 3) * (
+                port6['SMALL HiBM']
+                + port6['ME1 BM2']
+                + port6['SMALL LoBM']
+            )
+            - (1 / 3) * (
+                port6['BIG HiBM']
+                + port6['ME2 BM2']
+                + port6['BIG LoBM']
+            )
+        )
+
+        # Compute HML
+        hml = (
+            (1 / 2) * (port6['SMALL HiBM'] + port6['BIG HiBM'])
+            - (1 / 2) * (port6['SMALL LoBM'] + port6['BIG LoBM'])
+        )
+
+        # Ensure index is Date strings
+        return smb, hml
+
+    def compute_market_return(self, crsp_df: Optional[pd.DataFrame] = None) -> pd.Series:
+        """
+        Compute value-weighted market return for each month from CRSP data.
+
+        VW return = sum(RET * lagged_ME) / sum(lagged_ME) for each month
+        where lagged_ME = SHROUT * abs(PRC) from the previous month.
+
+        Args:
+            crsp_df: Optional CRSP monthly returns DataFrame with PERMNO, date, RET, PRC, SHROUT.
+                     If omitted, CRSPSource.load_and_clean() is used.
+
+        Returns:
+            Series indexed by Date (YYYY-MM strings) with value-weighted market returns in percent.
+        """
+        if crsp_df is None:
+            crsp_df = self.crsp_source.load_and_clean()
+
+        if crsp_df is None or crsp_df.empty:
+            return pd.Series(dtype=float, name='Mkt-RF')
+
+        # Make a copy to avoid modifying the original
+        df = crsp_df.copy()
+
+        # Ensure required columns exist
+        required_cols = ['PERMNO', 'date', 'RET', 'PRC', 'SHROUT']
+        for col in required_cols:
+            if col not in df.columns:
+                raise ValueError(f"CRSP DataFrame must contain column: {col}")
+
+        # Convert date to datetime
+        df['date'] = pd.to_datetime(df['date'])
+
+        # Get month identifier (for grouping)
+        df['_month'] = df['date'].dt.to_period('M').dt.to_timestamp()
+
+        # Compute market equity (ME) with lag
+        # ME for month t is calculated using ME from month t-1 (lagged)
+        # First, compute ME for each row
+        df['ME'] = df['PRC'].abs() * df['SHROUT']
+
+        # Then compute lagged ME by PERMNO
+        df['_lagged_ME'] = df.groupby('PERMNO')['ME'].shift(1)
+
+        # Value-weighted return calculation
+        def compute_vw_return(group):
+            """Compute value-weighted return for a group of stocks in a month."""
+            valid = group.dropna(subset=['RET', '_lagged_ME'])
+            valid = valid[valid['_lagged_ME'] > 0]
+
+            if valid.empty:
+                return pd.Series({'vw_return': np.nan})
+
+            weights = valid['_lagged_ME'].astype(float)
+            returns = valid['RET'].astype(float)
+
+            vw_return = (weights * returns).sum() / weights.sum()
+            return pd.Series({'vw_return': vw_return})
+
+        # Group by month and compute VW returns
+        vw_returns = df.groupby('_month').apply(compute_vw_return, include_groups=False)
+
+        # Convert to Series and rename
+        result = vw_returns['vw_return'].rename('Mkt-RF')
+
+        # Debug: print the index
+        print(f"DEBUG: vw_returns.index = {vw_returns.index}")
+        print(f"DEBUG: result.index = {result.index}")
+
+        # Convert index to YYYY-MM strings
+        result.index = result.index.strftime('%Y-%m')
+
+        # Return in percent (CRSP returns are typically in decimal, so multiply by 100)
+        result = result * 100.0
+
+        return result
+
+    def assemble_factors(
+        self,
+        port6: Optional[pd.DataFrame] = None,
+        crsp_df: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
+        """
+        Assemble final factor file with Date, Mkt-RF, SMB, HML, RF columns.
+
+        Args:
+            port6: Optional 6-portfolio returns DataFrame. If omitted, computed via
+                   compute_smb_hml().
+            crsp_df: Optional CRSP returns DataFrame. If omitted, computed via
+                     compute_market_return().
+
+        Returns:
+            DataFrame with columns: Date, Mkt-RF, SMB, HML, RF
+            Index is Date (YYYY-MM strings).
+            All values in percent.
+            Date range: 1964-07 to 1991-12.
+        """
+# Get SMB and HML
+        if port6 is None:
+            port6 = self.portfolio_constructor.build_6_portfolios()
+
+        smb, hml = self.compute_smb_hml(port6)
+
+        # Get market VW return
+        mkt_return = self.compute_market_return(crsp_df)
+
+        # Align all factors on the same dates
+        # Get common dates (intersection of port6 index and mkt_return index)
+        common_dates = port6.index.intersection(mkt_return.index)
+
+        # Filter to common dates
+        smb_aligned = smb.loc[common_dates]
+        hml_aligned = hml.loc[common_dates]
+        mkt_return_aligned = mkt_return.loc[common_dates]
+
+        # Load RF from Ken French data
+        rf_path = os.path.join(self.crsp_source.base_dir, 'data', 'ff_factors.csv')
+        if os.path.exists(rf_path):
+            rf_df = pd.read_csv(rf_path)
+            rf = rf_df['RF'].values
+        else:
+            raise FileNotFoundError(f"RF data not found at: {rf_path}")
+
+        # Create date alignment
+        combined = pd.DataFrame({
+            'Date': list(common_dates),
+            'Mkt-RF': mkt_return_aligned.values,
+            'SMB': smb_aligned.values,
+            'HML': hml_aligned.values,
+            'RF': rf[:len(common_dates)],  # Trim RF to common dates
+        })
+        combined = combined.reset_index(drop=True)
+
+        # Filter to date range 1964-07 to 1991-12
+        start_date = '1964-07'
+        end_date = '1991-12'
+        combined = combined[
+            (combined['Date'] >= start_date) &
+            (combined['Date'] <= end_date)
+        ].copy()
+
+        # Sort by date
+        combined = combined.sort_values('Date').reset_index(drop=True)
+
+        # Format Date as YYYY-MM (from YYYY-MM-DD)
+        combined['Date'] = pd.to_datetime(combined['Date']).dt.strftime('%Y-%m')
+
+        # Keep only required columns
+        result = combined[['Date', 'Mkt-RF', 'SMB', 'HML', 'RF']].copy()
+        result.index.name = 'Date'
+
+        return result
