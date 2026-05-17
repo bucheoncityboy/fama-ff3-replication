@@ -18,6 +18,7 @@ SCRIPTS = [
     "08_section8a_rmo_regressions.py",
     "09_section11_ep_dp_portfolios.py",
     "10_appendix_table_exports.py",
+    "11_submission_visualizations.py",
 ]
 
 LEGACY_RESEARCH_FILES = [
