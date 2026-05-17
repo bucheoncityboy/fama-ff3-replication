@@ -91,6 +91,14 @@ python 09_section11_ep_dp_portfolios.py
 python -m pytest -q
 ```
 
+### Appendix 기준표 커버리지
+
+`Fama-French 1993 재현 및 정리.md`를 기준으로 한 표별 반영 상태는 `TABLE_COVERAGE_AUDIT.md`에 정리되어 있다.
+
+- **완전 반영에 가까운 항목**: Table 8a, Table 10 제외, Table 11
+- **부분 반영 항목**: Table 1, Table 2, Table 3, Table 4, Table 5, Table 6, Table 7a, Table 9a, Table 9c
+- **중요 주의사항**: `output/table3_bond.csv`, `output/table1_market.csv`, `output/table5_smbhml.csv`, `output/table4_stock3f.csv`, `output/table5_five_factor.csv`, `output/intercept_analysis.csv`는 연구용 마스터 출력이라 **과제 기준에서 제외한 채권 블록까지 함께 포함**할 수 있다. README 본문에서는 과제 기준상 필요한 주식 측 결과만 요약했다.
+
 ---
 
 ## 4. 핵심 결과 (Key Results)
