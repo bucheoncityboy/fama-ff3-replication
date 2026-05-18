@@ -30,7 +30,7 @@ This repository is now organized around **assignment submission outputs only**. 
 | Table 8b | Excluded | not exported | intentionally omitted |
 | Table 9a | Covered with note | `appendix_output/table9a_stock_alphas.csv` | models (ii), (iii), (iv) only; (i) and (v) excluded per 추가 제외 지시 |
 | Table 9b | Excluded | not exported | intentionally omitted |
-| Table 9c | Covered with note | `appendix_output/table9c_joint_tests.csv` | F-test exported, bootstrap column left blank |
+| Table 9c | Covered | `appendix_output/table9c_joint_tests.csv` | F-distribution and residual bootstrap (B=999) p-values |
 | Table 10 | Excluded | not exported | intentionally omitted |
 | Table 11 | Covered | `appendix_output/table11_ep_dp_long.csv` | long-format export |
 
@@ -47,5 +47,5 @@ This repository is now organized around **assignment submission outputs only**. 
 ## 3. Notes
 
 1. Table 1 panel 3 is provided as a reference snapshot because the repository does not contain the raw firm-level inputs needed to reconstruct the full 25-cell E/P and D/P grid directly.
-2. Table 9c includes F-distribution based joint alpha tests. The bootstrap probability column is left blank rather than filled with fabricated values.
+2. Table 9c includes both F-distribution based joint alpha tests and residual bootstrap (B=999) probability levels. Bootstrap resamples restricted-model residuals with replacement (preserving cross-sectional correlation) to generate pseudo-returns under H0: all alphas = 0.
 3. Excluded subtables are omitted at the file level in `appendix_output/`, not just hidden in README text.

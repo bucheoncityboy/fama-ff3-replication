@@ -244,21 +244,34 @@ def build_table9(stock: pd.DataFrame, bond: pd.DataFrame, factors: pd.DataFrame)
 def compute_grs(returns_df: pd.DataFrame, factors_df: pd.DataFrame, factor_names: list[str], label: str) -> dict:
     aligned = returns_df.join(factors_df[factor_names], how="inner").dropna()
     port_names = returns_df.columns.tolist()
+    N = len(port_names)
+    K = len(factor_names)
+
+    # ---- Unrestricted regressions (with intercept / alpha) ----
     alpha_vals = []
     t_vals = []
-    residuals = []
+    unrestricted_residuals = []
     for portfolio in port_names:
         y = aligned[portfolio]
         x = aligned[factor_names]
         res = re.run_ols(y, x, add_const=True)
         alpha_vals.append(res["intercept"])
         t_vals.append(res["intercept_t_stat"])
-        residuals.append(res["residuals"])
+        unrestricted_residuals.append(res["residuals"])
 
-    resid_df = pd.concat(residuals, axis=1).dropna()
+    # ---- Restricted regressions (no intercept; H0: all alphas = 0) ----
+    restricted_betas: dict[str, dict] = {}
+    restricted_residuals = []
+    for portfolio in port_names:
+        y = aligned[portfolio]
+        x = aligned[factor_names]
+        res = re.run_ols(y, x, add_const=False)
+        restricted_betas[portfolio] = res["coefficients"]
+        restricted_residuals.append(res["residuals"])
+
+    # ---- Original GRS F-statistic from unrestricted results ----
+    resid_df = pd.concat(unrestricted_residuals, axis=1).dropna()
     T = len(resid_df)
-    N = len(port_names)
-    K = len(factor_names)
     sigma = resid_df.cov().values
     mu_f = aligned.loc[resid_df.index, factor_names].mean().values.reshape(-1, 1)
     sigma_f = aligned.loc[resid_df.index, factor_names].cov().values
@@ -267,18 +280,90 @@ def compute_grs(returns_df: pd.DataFrame, factors_df: pd.DataFrame, factor_names
     alphas = np.array(alpha_vals)
     theta_sq = (mu_f.T @ sigma_f_inv @ mu_f).item()
     alpha_term = (alphas.reshape(1, -1) @ sigma_inv @ alphas.reshape(-1, 1)).item()
-    f_stat = ((T - N - K) / N) * (alpha_term / (1 + theta_sq))
-    p_value = 1 - stats.f.cdf(f_stat, N, T - N - K)
+    f_obs = ((T - N - K) / N) * (alpha_term / (1 + theta_sq))
+    f_p_value = 1 - stats.f.cdf(f_obs, N, T - N - K)
+
+    # ---- Residual bootstrap for empirical p-value ----
+    # Align restricted residuals to a common T×N matrix
+    restricted_resid_df = pd.concat(restricted_residuals, axis=1).dropna()
+    restricted_resid_df.columns = port_names
+    T_boot = len(restricted_resid_df)
+
+    # Factor data aligned to the bootstrap index
+    factor_boot = aligned.loc[restricted_resid_df.index, factor_names]
+
+    # θ² from the bootstrap sample (factors are fixed, not resampled)
+    mu_f_boot = factor_boot.mean().values.reshape(-1, 1)
+    sigma_f_boot = factor_boot.cov().values
+    sigma_f_inv_boot = np.linalg.pinv(sigma_f_boot)
+    theta_sq_boot = (mu_f_boot.T @ sigma_f_inv_boot @ mu_f_boot).item()
+
+    # Fitted values from the restricted model: β̂ · f
+    fitted = pd.DataFrame(index=restricted_resid_df.index, columns=port_names, dtype=float)
+    for i, portfolio in enumerate(port_names):
+        betas = restricted_betas[portfolio]
+        fitted_vals = np.zeros(T_boot)
+        for f in factor_names:
+            fitted_vals += betas.get(f, 0.0) * factor_boot[f].values
+        fitted[portfolio] = fitted_vals
+
+    B = 999
+    rng = np.random.default_rng(42)
+    resid_values = restricted_resid_df.values   # T_boot × N
+    fitted_values = fitted.values               # T_boot × N
+    f_boot_list: list[float] = []
+
+    for _ in range(B):
+        # 1) Resample T_boot time indices (preserving cross‑sectional correlation)
+        idx = rng.integers(0, T_boot, size=T_boot)
+        eps_star = resid_values[idx]                     # T_boot × N
+
+        # 2) Pseudo‑returns under H0
+        pseudo_returns = fitted_values + eps_star        # T_boot × N
+
+        # 3) Unrestricted regression on pseudo‑data → obtain bootstrap alphas
+        boot_alphas = []
+        boot_residuals = []
+        for i, portfolio in enumerate(port_names):
+            y_star = pd.Series(pseudo_returns[:, i], index=restricted_resid_df.index)
+            x = factor_boot
+            res = re.run_ols(y_star, x, add_const=True)
+            boot_alphas.append(res["intercept"])
+            boot_residuals.append(res["residuals"])
+
+        # 4) Compute GRS F‑statistic on pseudo‑data
+        boot_resid_df = pd.concat(boot_residuals, axis=1).dropna()
+        T_eff = len(boot_resid_df)
+        if T_eff < N + K + 1:
+            continue
+
+        boot_sigma = boot_resid_df.cov().values
+        boot_alphas_arr = np.array(boot_alphas)
+        boot_sigma_inv = np.linalg.pinv(boot_sigma)
+        boot_alpha_term = (
+            boot_alphas_arr.reshape(1, -1) @ boot_sigma_inv @ boot_alphas_arr.reshape(-1, 1)
+        ).item()
+
+        f_boot = ((T_eff - N - K) / N) * (boot_alpha_term / (1 + theta_sq_boot))
+        if np.isfinite(f_boot) and f_boot > 0:
+            f_boot_list.append(f_boot)
+
+    n_boot = len(f_boot_list)
+    if n_boot > 0:
+        bootstrap_p = (np.sum(np.array(f_boot_list) >= f_obs) + 1.0) / (n_boot + 1.0)
+    else:
+        bootstrap_p = np.nan
+
     return {
         "model": label,
         "N": N,
         "K": K,
         "T": T,
-        "F_stat": f_stat,
-        "F_dist_p_value": p_value,
+        "F_stat": f_obs,
+        "F_dist_p_value": f_p_value,
         "mean_abs_alpha": float(np.nanmean(np.abs(alpha_vals))),
         "mean_abs_t_alpha": float(np.nanmean(np.abs(t_vals))),
-        "bootstrap_probability_level": np.nan,
+        "bootstrap_probability_level": bootstrap_p,
     }
 
 
