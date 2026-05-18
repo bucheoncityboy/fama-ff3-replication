@@ -6,6 +6,9 @@ output/*.md
 # Sisyphus tracking
 .sisyphus/
 
+# OpenCode agent operational data
+.omx/
+
 # Python cache
 __pycache__/
 *.pyc

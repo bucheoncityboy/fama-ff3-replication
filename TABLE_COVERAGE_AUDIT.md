@@ -17,19 +17,18 @@ This repository is now organized around **assignment submission outputs only**. 
 | Table 2 panel 1 correlation matrix | Covered | `appendix_output/table2_panel1_correlation_matrix.csv` | factor correlation matrix |
 | Table 2 panel 2 | Covered | `appendix_output/table2_panel2_stock_mean_std.csv` | stock mean/std grid |
 | Table 2 panel 3 | Covered | `appendix_output/table2_panel3_stock_tstats.csv` | stock t-stat grid |
-| Table 3 stock block | Covered | `appendix_output/table3_*` | stock-only export |
-| Table 3 bond block | Excluded | not exported | intentionally omitted |
+| Table 3 | Excluded | not exported | entirely excluded per 추가 제외 지시 |
 | Table 4 stock block | Covered | `appendix_output/table4_*` | stock-only export |
 | Table 4 bond block | Excluded | not exported | intentionally omitted |
 | Table 5 stock block | Covered | `appendix_output/table5_*` | stock-only export |
 | Table 5 bond block | Excluded | not exported | intentionally omitted |
 | Table 6 stock block | Covered | `appendix_output/table6_*` | stock-only export |
 | Table 6 bond block | Excluded | not exported | intentionally omitted |
-| Table 7a | Covered | `appendix_output/table7a_*` | stock-only export |
+| Table 7a | Excluded | not exported | entirely excluded per 추가 제외 지시 |
 | Table 7b | Excluded | not exported | intentionally omitted |
-| Table 8a | Covered | `appendix_output/table8a_*` | stock-only export |
+| Table 8a | Excluded | not exported | entirely excluded per 추가 제외 지시 |
 | Table 8b | Excluded | not exported | intentionally omitted |
-| Table 9a | Covered | `appendix_output/table9a_stock_alphas.csv` | stock alpha matrix |
+| Table 9a | Covered with note | `appendix_output/table9a_stock_alphas.csv` | models (ii), (iii), (iv) only; (i) and (v) excluded per 추가 제외 지시 |
 | Table 9b | Excluded | not exported | intentionally omitted |
 | Table 9c | Covered with note | `appendix_output/table9c_joint_tests.csv` | F-test exported, bootstrap column left blank |
 | Table 10 | Excluded | not exported | intentionally omitted |
