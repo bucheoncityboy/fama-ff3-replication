@@ -42,7 +42,19 @@ python -m pytest -q
 - 매년 6월 NYSE breakpoint로 25개 Size×BE/ME 포트폴리오를 구성했다.
 - 6개 2×3 포트폴리오도 함께 만들고 여기서 SMB/HML을 재계산했다.
 
-논문 방법론상 1963-07 시점 포트폴리오를 만들려면 1962년 BE가 필요한데, 현재 데이터엔 그 연도가 없어서 **1963-07~1964-06은 seed/hybrid 구간**, 1964-07 이후는 자체 구축 구간으로 처리했다.
+이 과정에서 한 가지 데이터 제약이 있다. Fama-French (1993) 방법론은 매년 7월 포트폴리오를 재구성할 때 **작년 12월의 BE(장부가)와 당해 6월의 ME(시가총액)** 을 짝지어서 Size-BE/ME 분류를 수행한다. 따라서 1963년 7월 첫 포트폴리오를 만들려면 1962년 12월 시점의 BE가 필요하다. 하지만 `compustat_be.csv`는 1964년부터 시작되므로 1962년 BE는 존재하지 않는다.
+
+이 문제를 해결하기 위해 **hybrid approach**를 채택했다. `compustat_portfolio_builder.py`의 `_hybridize_ken_french_data()`가 이 로직을 담당한다.
+
+| 구간 | 기간 | 데이터 출처 | 설명 |
+|---|---|---|---|
+| **Seed (보존)** | 1963-07 ~ 1964-06 | Ken French Data Library 원본 | 1962년 BE 부재로 자체 구성이 불가능한 첫 12개월. French의 원본 25 portfolio / 6 portfolio / factor 값을 그대로 사용한다. |
+| **Replacement (대체)** | 1964-07 ~ 1991-12 | 자체 구성(CRSP + Compustat BE) | 1964년 BE부터 사용 가능하므로, CRSP raw 데이터와 Compustat BE로 직접 구성한 포트폴리오 값이 French 원본을 월별로 덮어쓴다. 자체 구성에 실패한 월이 있으면 French 값이 fallback으로 유지된다. |
+
+즉, SMB와 HML 요인도 위와 동일한 hybrid 구조로 생성된다:
+- `01_section2_factors.py`가 6개 Size-BE/ME 포트폴리오로 SMB/HML을 재계산하고
+- `compustat_portfolio_builder.py`가 이 재계산 값을 1964-07부터 French 원본 위에 덮어씌운다
+- 결과적으로 **전 기간(1963-07~1991-12)에 빈 구간 없이 연속적인 factor 시계열**이 확보된다
 
 ### 2.2 채권 요인 및 채권 프록시
 
