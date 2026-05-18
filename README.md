@@ -84,7 +84,7 @@ python -m pytest -q
 ## 2.5 표별 데이터 출처와 전처리
 
 | 표 | 원천 데이터 | 전처리 | 최종 제출 파일 |
-|---|---|---|---|---|
+|---|---|---|---|
 | Table 1 | **Compustat**: `compustat_be.csv` (GVKEY, BE, SICH)<br>**CRSP**: `crsp/RET__DLSTCD_1962.01_1991.12/` → `PRC`, `RET`, `SHROUT`, `PERMNO`, `PERMCO`, `DLSTCD`, `DLRET`<br>**Mapping**: `data/gvkey_permco_permno.csv` (GVKEY↔PERMCO↔PERMNO) | common stock 필터(SICH), ME 계산(PRC×SHROUT), NYSE breakpoint, 25 Size×BE/ME 포트폴리오 분류, formation year별 평균 기업수/시총/시총비중 계산 | `appendix_output/table1_panel1_firm_count_market_cap.csv`, `appendix_output/table1_panel2_cap_share_firm_count.csv` |
 | Table 2 panel 1 | **CRSP FF factors**: `crsp/FF1993_results/data/crsp_ff_factors.csv` (Mkt-RF, SMB, HML, RF)<br>**FRED**: GS1, DGS10, TB3MS, BAA, AAA (TERM, DEF)<br>**채권 포트폴리오**: `appendix_output/bond_portfolios_excess.csv` | RM, TB, LTG, CB, RM-RF, RMO, SMB, HML, TERM, DEF 시계열의 평균/std/t/자기상관 계산 + 상관행렬 생성 | `appendix_output/table2_panel1_factor_summary.csv`, `appendix_output/table2_panel1_correlation_matrix.csv` |
 | Table 2 panel 2-3 | **CRSP stock 포트폴리오**: `appendix_output/stock_portfolios_excess.csv` (25개 VW 포트폴리오 월별 수익률) | 25개 주식 포트폴리오 월 초과수익률에서 mean/std 및 t-stat 추출, 5×5 그리드로 재배열 | `appendix_output/table2_panel2_stock_mean_std.csv`, `appendix_output/table2_panel3_stock_tstats.csv` |
@@ -222,7 +222,7 @@ python -m pytest -q
 아래 표는 이번 과제에서 가장 중요한 구현 결과를 **핵심 주장 / 근거 수치 / 대응 시각화 / 해석**으로 묶어 정리한 것이다.
 
 | 핵심 주장 | 근거 수치 | 대응 표 | 대응 시각화 | 해석 |
-|---|---|---|---|---|---|
+|---|---|---|---|---|
 | 가치 효과와 규모 효과가 동시에 나타난다 | Small-High BM = **1.06%/월**, Big-Low BM = **0.39%/월** | [Table 2 panels 2-3](appendix_output/table2_panel2_stock_mean_std.csv) | ![Figure 1](appendix_output/submission_fig1_stock_mean_heatmap.png) | 히트맵에서 오른쪽(High BM)으로 갈수록 높은 값이 많고, 상단 Small 쪽이 하단 Big보다 강하다. 즉 **HiBM > LoBM**, **Small > Big** 구조가 동시에 보인다. |
 | 핵심 주식 요인 프리미엄은 양(+)이고 의미 있는 크기를 가진다 | RM-RF = **0.42%/월**, SMB = **0.29%/월**, HML = **0.41%/월** | [Table 2 panel 1](appendix_output/table2_panel1_factor_summary.csv) | ![Figure 2](appendix_output/submission_fig2_factor_premiums.png) | 주식 측 핵심 요인인 RM-RF, SMB, HML이 모두 양(+)의 평균을 가진다. TERM, DEF는 절대 크기는 더 크지만 채권 프록시 성격이 강하므로 해석을 분리해야 한다. |
 | 3요인 모형은 CAPM보다 훨씬 높은 설명력을 가진다 | CAPM 평균 R² = **0.7524**, SMB+HML 평균 R² = **0.3488**, FF3F 평균 R² = **0.8992**, 개선폭 CAPM→FF3F = **+0.1468** | [Table 4](appendix_output/table4_panel2_r2_se.csv), [Table 5](appendix_output/table5_panel3_r2_se.csv), [Table 6](appendix_output/table6_panel4_r2_se.csv) | ![Figure 3](appendix_output/submission_fig3_model_r2.png) | Figure 3에서 1요인에서 3요인으로 점프가 가장 크다. 이것이 바로 **FF3F가 CAPM보다 우월하다**는 논문 핵심 주장에 대한 직접 증거다. |
