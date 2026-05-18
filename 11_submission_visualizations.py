@@ -99,11 +99,49 @@ def fig4_ep_dp_r2() -> None:
     save(fig, "submission_fig4_ep_dp_r2.png")
 
 
+def fig5_alpha_and_joint_test() -> None:
+    alpha_df = pd.read_csv(OUT_DIR / "table9a_stock_alphas.csv")
+    joint_df = pd.read_csv(OUT_DIR / "table9c_joint_tests.csv")
+
+    def mean_abs_alpha(col: str) -> float:
+        values = []
+        for value in alpha_df[col]:
+            alpha = float(str(value).split("/")[0].strip())
+            values.append(abs(alpha))
+        return float(np.mean(values))
+
+    alpha_models = ["(ii)", "(iv)", "(v)"]
+    alpha_values = [mean_abs_alpha(col) for col in alpha_models]
+    f_values = [
+        float(joint_df.loc[joint_df["model"] == "(ii)", "F_stat"].iloc[0]),
+        float(joint_df.loc[joint_df["model"] == "(iv)", "F_stat"].iloc[0]),
+        float(joint_df.loc[joint_df["model"] == "(v)", "F_stat"].iloc[0]),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    labels = ["CAPM", "FF3F", "FF5F"]
+    axes[0].bar(labels, alpha_values, color="#4C78A8")
+    axes[0].set_title("Figure 5A. Mean absolute alpha by model")
+    axes[0].set_ylabel("Mean |alpha|")
+    for i, v in enumerate(alpha_values):
+        axes[0].text(i, v, f"{v:.3f}", ha="center", va="bottom", fontsize=9)
+
+    axes[1].bar(labels, f_values, color="#E45756")
+    axes[1].set_title("Figure 5B. Joint alpha F-statistics")
+    axes[1].set_ylabel("F-statistic")
+    for i, v in enumerate(f_values):
+        axes[1].text(i, v, f"{v:.2f}", ha="center", va="bottom", fontsize=9)
+
+    save(fig, "submission_fig5_alpha_tests.png")
+
+
 def main() -> None:
     fig1_stock_mean_heatmap()
     fig2_factor_bar()
     fig3_model_r2()
     fig4_ep_dp_r2()
+    fig5_alpha_and_joint_test()
     print(f"Submission visualizations written to {OUT_DIR.resolve()}")
 
 
